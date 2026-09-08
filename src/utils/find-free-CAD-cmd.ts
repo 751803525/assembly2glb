@@ -1,6 +1,6 @@
 import path from 'path';
 import { logger } from '../cli/logger.js';
-import { fileExists } from './file.js';
+import { fileUtils } from './file.js';
 import { promisify } from 'util';
 import { exec } from 'child_process';
 import fs from 'fs/promises';
@@ -15,7 +15,7 @@ export async function findFreeCADCmd(): Promise<{ exe: string; isPython: boolean
   // 1. 优先使用自定义环境变量
   if (process.env.FREECAD_CMD) {
     const customPath = process.env.FREECAD_CMD;
-    if (await fileExists(customPath)) {
+    if (await fileUtils.exists(customPath)) {
       logger.info(`使用环境变量指定的 FreeCAD: ${customPath}`);
       const isPython = path.basename(customPath).toLowerCase().startsWith('python');
       return { exe: customPath, isPython };
@@ -37,7 +37,7 @@ export async function findFreeCADCmd(): Promise<{ exe: string; isPython: boolean
       const pyPath = path.join(binDir, 'python.exe');
 
       // 优先使用同目录下的 python.exe
-      if (await fileExists(pyPath)) {
+      if (await fileUtils.exists(pyPath)) {
         logger.info(`从系统 PATH 的 FreeCAD 目录找到 python.exe: ${pyPath}`);
         return { exe: pyPath, isPython: true };
       }
@@ -61,11 +61,11 @@ export async function findFreeCADCmd(): Promise<{ exe: string; isPython: boolean
       const pyPath = path.join(binDir, 'python.exe');
       const cmdPath = path.join(binDir, 'freecadcmd.exe');
 
-      if (await fileExists(pyPath)) {
+      if (await fileUtils.exists(pyPath)) {
         logger.info(`从注册表找到 FreeCAD Python 解释器: ${pyPath}`);
         return { exe: pyPath, isPython: true };
       }
-      if (await fileExists(cmdPath)) {
+      if (await fileUtils.exists(cmdPath)) {
         logger.info(`从注册表找到 FreeCAD: ${cmdPath}`);
         return { exe: cmdPath, isPython: false };
       }
@@ -92,12 +92,12 @@ export async function findFreeCADCmd(): Promise<{ exe: string; isPython: boolean
           const cmdPath = path.join(binDir, 'freecadcmd.exe');
 
           // 优先寻找 bin/python.exe，彻底避开 FreeCAD 1.0 的 -c/[no supported file format] 报错
-          if (await fileExists(pyPath)) {
+          if (await fileUtils.exists(pyPath)) {
             logger.info(`从常见目录找到 FreeCAD Python: ${pyPath}`);
             return { exe: pyPath, isPython: true };
           }
 
-          if (await fileExists(cmdPath)) {
+          if (await fileUtils.exists(cmdPath)) {
             logger.info(`从常见目录找到 FreeCAD Command: ${cmdPath}`);
             return { exe: cmdPath, isPython: false };
           }

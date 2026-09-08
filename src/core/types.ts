@@ -1,16 +1,9 @@
 export interface PipelineConfig {
   inputPath: string;
   outputDir: string;
-  steps: number[];
+  simplify: number;
+  dedup: boolean;
   mode: 'merged' | 'split' | 'both';
-  targetFaces: number;
-  keepTemp: boolean;
-}
-
-export interface PipelineContext {
-  config: PipelineConfig;
-  tempDir: string;
-  mergedPath: string;
   keepTemp: boolean;
 }
 

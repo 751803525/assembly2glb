@@ -1,25 +1,16 @@
 import chalk from 'chalk';
-
 export const logger = {
-  info: (msg: string) => console.log(chalk.blue('ℹ') + ' ' + msg),
-  success: (msg: string) => console.log(chalk.green('✓') + ' ' + msg),
-  warn: (msg: string) => console.log(chalk.yellow('⚠') + ' ' + msg),
-  error: (...args: unknown[]) => {
-    const messages = args.map((arg) => {
-      if (arg instanceof Error) {
-        return arg.message;
-      }
-      if (typeof arg === 'object') {
-        try {
-          return JSON.stringify(arg);
-        } catch {
-          return String(arg);
-        }
-      }
-      return String(arg);
-    });
-    console.log(chalk.red('✗') + ' ' + messages.join(' '));
+  debug: (tag: string, msg: any) => {
+    console.debug(chalk.blue(`[DEBUG: ${tag}]`), msg);
   },
-  step: (step: number, msg: string) => console.log(chalk.cyan(`[${step}]`) + ' ' + msg),
-  line: () => console.log(''),
+
+  info: (tag: string, msg: any) => {
+    console.info(chalk.green(`[INFO: ${tag}]`), msg);
+  },
+  warn: (tag: string, msg: any) => {
+    console.warn(chalk.yellow(`[WARN: ${tag}]`), msg);
+  },
+  error: (tag: string, msg: any) => {
+    console.warn(chalk.red(`[ERROR: ${tag}]`), msg);
+  },
 };
