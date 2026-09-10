@@ -1,16 +1,16 @@
 import chalk from 'chalk';
 export const logger = {
-  debug: (tag: string, msg: any) => {
-    console.debug(chalk.blue(`[DEBUG: ${tag}]`), msg);
+  debug: (tag: string, message?: any, ...optionalParams: any[]) => {
+    console.debug(chalk.blue(`[${tag}]`), message, ...optionalParams);
+  },
+  info: (tag: string, message?: any, ...optionalParams: any[]) => {
+    console.info(chalk.green(`[${tag}]`), message, ...optionalParams);
+  },
+  warn: (tag: string, message?: any, ...optionalParams: any[]) => {
+    console.warn(chalk.yellow(`[${tag}]`), message, ...optionalParams);
   },
 
-  info: (tag: string, msg: any) => {
-    console.info(chalk.green(`[INFO: ${tag}]`), msg);
-  },
-  warn: (tag: string, msg: any) => {
-    console.warn(chalk.yellow(`[WARN: ${tag}]`), msg);
-  },
-  error: (tag: string, msg: any) => {
-    console.warn(chalk.red(`[ERROR: ${tag}]`), msg);
+  error: (tag: string, message?: any, ...optionalParams: any[]) => {
+    console.error(chalk.red(`[${tag}]`), message, ...optionalParams);
   },
 };

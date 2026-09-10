@@ -1,6 +1,6 @@
 import fs from 'fs-extra';
 import path from 'path';
-import initocctimportjs from 'occt-import-js';
+import occtimportjs from 'occt-import-js';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { simplify, dedup, prune } from '@gltf-transform/functions';
 import { MeshoptSimplifier } from 'meshoptimizer';
@@ -12,7 +12,7 @@ let occtInstance: any = null;
 
 async function getOcct() {
   if (!occtInstance) {
-    occtInstance = await initocctimportjs();
+    occtInstance = await occtimportjs();
   }
   return occtInstance;
 }
@@ -40,108 +40,103 @@ export interface AssemblyNode {
   matrix: number[]; // 16位原生 4x4 变换矩阵
   children: AssemblyNode[];
 }
+/**
+ * 校验节点是否可见
+ * 兼容 AP203/AP214/AP242 不同协议下的可见性标识
+ */
+function isNodeVisible(occtNode: any): boolean {
+  if (occtNode.visible !== undefined && occtNode.visible === false) return false;
+  if (occtNode.isVisible !== undefined && occtNode.isVisible === false) return false;
+  return true;
+}
+/**
+ * 递归解析单个节点
+ */
+// function parseNode(occtNode: any): AssemblyNode | null {
+//   // 1. 过滤不可见节点
+//   if (!isNodeVisible(occtNode)) {
+//     return null;
+//   }
 
+//   // 2. 变换矩阵解析与分解（AP203 缺省时赋予单位矩阵）
+//   const matrix =
+//     Array.isArray(occtNode.matrix) && occtNode.matrix.length === 16
+//       ? occtNode.matrix
+//       : [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
+//   const transform = decomposeMatrix(matrix);
+
+//   // 3. AP203 属性兼容（处理空名称与 ID 生成）
+//   const rawName = occtNode.name ? String(occtNode.name).trim() : '';
+//   const nodeName = rawName.length > 0 ? rawName : null;
+//   const nodeId = occtNode.uuid || `node_${autoNodeIdCounter++}`;
+
+//   // 4. Mesh 几何数据索引绑定
+//   const meshIndex = typeof occtNode.mesh === 'number' && occtNode.mesh >= 0 ? occtNode.mesh : null;
+
+//   // 5. 递归处理子节点
+//   const children: AssemblyNode[] = [];
+//   if (Array.isArray(occtNode.children) && occtNode.children.length > 0) {
+//     for (const child of occtNode.children) {
+//       const parsedChild = parseNode(child);
+//       if (parsedChild) {
+//         children.push(parsedChild);
+//       }
+//     }
+//   }
+
+//   return {
+//     id: nodeId,
+//     name: nodeName,
+//     meshIndex: meshIndex,
+//     position: transform.position,
+//     rotation: transform.rotation,
+//     scale: transform.scale,
+//     matrix: matrix,
+//     children: children,
+//   };
+// }
 /**
  * 提取结构树和 位置/旋转/缩放 信息 (Extract Assembly Tree)
  * @param stepPath STEP 文件路径
  * @returns tree 数组，保证顶层统一为 [ Node1, Node2 ... ] 格式
  */
-export async function extractAssemblyTree(stepPath: string): Promise<{
-  tree: AssemblyNode[];
-  totalMeshesCount: number;
-}> {
+export async function extractAssemblyTree(stepPath: string): Promise<void> {
   const occt = await getOcct();
   const fileBuffer = await fs.readFile(stepPath);
 
-  // 解析 STEP 文件
-  const result = occt.ReadStepFile(fileBuffer, {
-    linearUnit: 'mm',
-    linearDeflection: 5.0, // 放宽到 2.0mm 甚至 5.0mm（超大装配体推荐 5.0）
-    angularDeflection: 1.0, // 放宽角度偏差
+  Object.keys(occt).forEach((key) => {
+    console.log(key);
   });
 
-  if (!result || !result.success) {
-    throw new Error(`解析 STEP 文件失败或文件损坏: ${stepPath}`);
-  }
+  // 解析 STEP 文件
+  // const result = occt.ReadStepFile(fileBuffer, {
+  //   linearUnit: 'mm',
+  //   linearDeflection: 10, // 放宽到 2.0mm 甚至 5.0mm（超大装配体推荐 5.0）
+  //   angularDeflection: 1.5, // 放宽角度偏差
+  // });
 
-  let autoNodeIdCounter = 0;
-
-  /**
-   * 校验节点是否可见
-   * 兼容 AP203/AP214/AP242 不同协议下的可见性标识
-   */
-  function isNodeVisible(occtNode: any): boolean {
-    if (occtNode.visible !== undefined && occtNode.visible === false) return false;
-    if (occtNode.isVisible !== undefined && occtNode.isVisible === false) return false;
-    return true;
-  }
-
-  /**
-   * 递归解析单个节点
-   */
-  function parseNode(occtNode: any): AssemblyNode | null {
-    // 1. 过滤不可见节点
-    if (!isNodeVisible(occtNode)) {
-      return null;
-    }
-
-    // 2. 变换矩阵解析与分解（AP203 缺省时赋予单位矩阵）
-    const matrix =
-      Array.isArray(occtNode.matrix) && occtNode.matrix.length === 16
-        ? occtNode.matrix
-        : [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-
-    const transform = decomposeMatrix(matrix);
-
-    // 3. AP203 属性兼容（处理空名称与 ID 生成）
-    const rawName = occtNode.name ? String(occtNode.name).trim() : '';
-    const nodeName = rawName.length > 0 ? rawName : null;
-    const nodeId = occtNode.uuid || `node_${autoNodeIdCounter++}`;
-
-    // 4. Mesh 几何数据索引绑定
-    const meshIndex =
-      typeof occtNode.mesh === 'number' && occtNode.mesh >= 0 ? occtNode.mesh : null;
-
-    // 5. 递归处理子节点
-    const children: AssemblyNode[] = [];
-    if (Array.isArray(occtNode.children) && occtNode.children.length > 0) {
-      for (const child of occtNode.children) {
-        const parsedChild = parseNode(child);
-        if (parsedChild) {
-          children.push(parsedChild);
-        }
-      }
-    }
-
-    return {
-      id: nodeId,
-      name: nodeName,
-      meshIndex: meshIndex,
-      position: transform.position,
-      rotation: transform.rotation,
-      scale: transform.scale,
-      matrix: matrix,
-      children: children,
-    };
-  }
+  // if (!result || !result.success) {
+  //   throw new Error(`解析 STEP 文件失败或文件损坏: ${stepPath}`);
+  // }
 
   // 统一输出为数组形式
-  const rootNodes: AssemblyNode[] = [];
+  // const rootNodes: AssemblyNode[] = [];
 
-  if (result.root) {
-    const parsedRoot = parseNode(result.root);
-    if (parsedRoot) rootNodes.push(parsedRoot);
-  } else if (Array.isArray(result.roots)) {
-    for (const rootItem of result.roots) {
-      const parsedRoot = parseNode(rootItem);
-      if (parsedRoot) rootNodes.push(parsedRoot);
-    }
-  }
+  // if (result.root) {
+  //   const parsedRoot = parseNode(result.root);
+  //   if (parsedRoot) rootNodes.push(parsedRoot);
+  // } else if (Array.isArray(result.roots)) {
+  //   for (const rootItem of result.roots) {
+  //     const parsedRoot = parseNode(rootItem);
+  //     if (parsedRoot) rootNodes.push(parsedRoot);
+  //   }
+  // }
 
-  return {
-    tree: rootNodes,
-    totalMeshesCount: result.meshes ? result.meshes.length : 0,
-  };
+  // return {
+  //   tree: result,
+  //   totalMeshesCount: result.meshes ? result.meshes.length : 0,
+  // };
 }
 
 /**

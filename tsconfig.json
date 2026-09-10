@@ -1,13 +1,10 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "lib": [
       "ES2022"
     ],
-    "outDir": "./dist",
-    "rootDir": "./src",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -21,7 +18,16 @@
     "noImplicitReturns": true,
     "types": [
       "node"
-    ]
+    ],
+    "baseUrl": ".", // 必须配置，paths 依赖它
+    "paths": {
+      "@/*": [
+        "src/*"
+      ] // 将 @/* 映射到 src/* 
+    },
+    "outDir": "./dist", // tsc 输出目录
+    "rootDir": "./src", // 源码根目录
+    "module": "NodeNext"
   },
   "include": [
     "src/**/*"

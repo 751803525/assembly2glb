@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import { program } from 'commander';
-import { processCommand } from './cli/commands/process.js';
-import { logger } from './cli/logger.js';
+import { processCommand } from '@/cli/commands/process.js';
+import { logger } from '@/cli/logger.js';
 
 program
   .command('process')

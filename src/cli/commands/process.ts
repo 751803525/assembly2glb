@@ -1,7 +1,7 @@
 import inquirer from 'inquirer';
-import { logger } from '../logger.js';
-import { runPipeline } from '../../core/pipeline/orchestrator.js';
-import type { PipelineConfig } from '../../core/types.js';
+import { logger } from '@/cli/logger.js';
+import { runPipeline } from '@/core/pipeline/orchestrator.js';
+import type { PipelineConfig } from '@/core/types.js';
 
 interface ProcessOptions {
   input?: string;
@@ -89,5 +89,8 @@ export async function processCommand(options: ProcessOptions): Promise<void> {
     keepTemp,
   };
   logger.info('process', config);
-  await runPipeline(config);
+  const result = await runPipeline(config);
+  if (result.code == 0) {
+    process.exit(0);
+  }
 }
