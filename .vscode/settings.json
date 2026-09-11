@@ -1,0 +1,11 @@
+{
+  "python.defaultInterpreterPath": "D:\\miniforge3\\envs\\cad_env\\python.exe",
+  "python.analysis.extraPaths": [
+    "D:\\miniforge3\\envs\\cad_env\\Lib\\site-packages"
+  ],
+  "python.terminal.activateEnvironment": false,
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.black-formatter",
+    "editor.formatOnSave": true
+  }
+}

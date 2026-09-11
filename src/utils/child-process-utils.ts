@@ -95,7 +95,7 @@ const exec = (
           logger.info(logTag, result);
         }
         if (stderr && stderr.length && logTag) {
-          logger.warn(logTag, safeDecode(stderr));
+          logger.error(logTag, safeDecode(stderr));
         }
 
         if (error) {

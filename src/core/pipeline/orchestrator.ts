@@ -22,10 +22,13 @@ export async function runPipeline(
   const { inputPath, outputDir, simplify, dedup, mode, keepTemp } = config;
 
   logger.info(TAG, `解析:${inputPath}`);
-  let cacheDir = await convertStep({
-    ...config,
-    outputDir: path.join(tempDir, 'convert'),
-  });
+  let cacheDir = await convertStep(
+    {
+      ...config,
+      outputDir: path.join(tempDir, 'convert'),
+    },
+    result.data
+  );
 
   logger.info(TAG, `解析结果:${cacheDir}`);
   // 开始减面
