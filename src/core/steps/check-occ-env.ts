@@ -1,7 +1,7 @@
-import { logger } from '@/cli/logger.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { exec, spawn } from '@/utils/child-process-utils.js';
+import { logger } from '@/utils/logger.js';
 
 const TAG = 'env-check';
 const cadEnvName = 'cad_env';

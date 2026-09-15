@@ -376,14 +376,14 @@ class StepToGlbConverter:
             }
 
         os.makedirs(self.glb_dir, exist_ok=True)
-        logger_info(f"生成原子 GLB 模型")
+        logger_info(f"生成叶子节点 GLB 模型")
         self._generate_glbs_recursive(root_tree)
         logger_info(f"模型导出完成！共生成{len(self.asset_cache)}个独立 GLB 文件。")
         os.makedirs(self.output_dir, exist_ok=True)
         with open(self.json_path, "w", encoding="utf-8") as f:
             json.dump(root_tree, f, ensure_ascii=False, indent=2)
 
-        logger_info(f"成功导出结构树文件: {self.json_path}")
+        logger_info(f"成功导出结构树文件: {os.path.basename(self.json_path)}")
 
 
 if __name__ == "__main__":

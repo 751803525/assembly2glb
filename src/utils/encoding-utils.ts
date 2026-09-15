@@ -96,6 +96,7 @@ export async function fileEncoding(
   targetEncoding: string = 'utf8',
   options: { limitBytes?: number; defaultEncoding?: string } = {}
 ): Promise<string> {
+  fileUtils.emptyDir(outputPath);
   const { limitBytes = 1024 * 1024, defaultEncoding = 'gbk' } = options;
   if (!fs.existsSync(inputPath)) throw new Error(`输入文件不存在: ${inputPath}`);
   const encoding = await detectNonAsciiEncoding(inputPath, limitBytes, defaultEncoding);

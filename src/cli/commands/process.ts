@@ -1,5 +1,4 @@
 import inquirer from 'inquirer';
-import { logger } from '@/utils/logger.js';
 import { runPipeline } from '@/core/pipeline/orchestrator.js';
 import { PipelineConfig } from '@/core/steps/types.js';
 
@@ -8,7 +7,7 @@ interface ProcessOptions {
   output?: string;
   simplify?: string | boolean;
   dedup?: boolean;
-  mode?: 'merged' | 'split' | 'both';
+  precision?: string;
   keepTemp?: boolean;
 }
 
@@ -37,6 +36,22 @@ export async function processCommand(options: ProcessOptions): Promise<void> {
     });
     outputDir = answer.output;
   }
+  // 3. 导出模型精度
+  let precision = 0.2;
+  if (options.precision) {
+    // 命令行明确指定了步骤
+    if (typeof options.precision == 'string') {
+      precision = parseFloat(options.precision);
+    } else {
+      const answer = await inquirer.prompt({
+        type: 'input',
+        name: 'output',
+        message: '模型精度:',
+        default: '0.2',
+      });
+      precision = parseFloat(answer.output);
+    }
+  }
   // 3. 减面参数
   let simplify = -1;
   if (options.simplify) {
@@ -47,8 +62,8 @@ export async function processCommand(options: ProcessOptions): Promise<void> {
       const answer = await inquirer.prompt({
         type: 'input',
         name: 'output',
-        message: '减面目标面数:',
-        default: '5000',
+        message: '减面比例:',
+        default: '70',
       });
       simplify = parseInt(answer.output);
     }
@@ -63,9 +78,9 @@ export async function processCommand(options: ProcessOptions): Promise<void> {
     outputDir,
     simplify,
     dedup,
+    precision,
     keepTemp,
   };
-  logger.info('process', config);
   const result = await runPipeline(config);
   if (result.code == 0) {
     process.exit(0);

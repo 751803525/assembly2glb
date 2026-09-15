@@ -3,12 +3,7 @@ import { ChildProcess, spawn as spawnImpl, exec as execImpl, SpawnOptions } from
 import { ExecException, ExecOptionsWithBufferEncoding } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import * as iconv from 'iconv-lite';
-const spawn = (
-  command: string,
-  args?: readonly string[],
-  options?: SpawnOptions,
-  logTag?: string
-) => {
+const spawn = (command: string, args?: string[], options?: SpawnOptions, logTag?: string) => {
   if (logTag) {
     const append = args ? ' ' + args.join(' ') : '';
     logger.info(logTag, `执行：${command.trim()} ${append}`);

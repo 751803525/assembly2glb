@@ -7,6 +7,8 @@ import fs from 'fs/promises';
 
 const execAsync = promisify(exec);
 
+const TAG = 'Free CAD';
+
 /**
  * 寻找可用于执行 Python 脚本的 FreeCAD 解释器路径
  * 优先返回 FreeCAD 附带的 bin/python.exe，次选 freecadcmd.exe
@@ -16,11 +18,11 @@ export async function findFreeCADCmd(): Promise<{ exe: string; isPython: boolean
   if (process.env.FREECAD_CMD) {
     const customPath = process.env.FREECAD_CMD;
     if (await fileUtils.exists(customPath)) {
-      logger.info(`使用环境变量指定的 FreeCAD: ${customPath}`);
+      logger.info(TAG, `使用环境变量指定的 FreeCAD: ${customPath}`);
       const isPython = path.basename(customPath).toLowerCase().startsWith('python');
       return { exe: customPath, isPython };
     }
-    logger.warn(`环境变量 FREECAD_CMD 指向的路径不存在: ${customPath}`);
+    logger.warn(TAG, `环境变量 FREECAD_CMD 指向的路径不存在: ${customPath}`);
   }
 
   // 2. 检查系统 PATH 中的 freecadcmd 或 python
@@ -38,11 +40,11 @@ export async function findFreeCADCmd(): Promise<{ exe: string; isPython: boolean
 
       // 优先使用同目录下的 python.exe
       if (await fileUtils.exists(pyPath)) {
-        logger.info(`从系统 PATH 的 FreeCAD 目录找到 python.exe: ${pyPath}`);
+        logger.info(TAG, `从系统 PATH 的 FreeCAD 目录找到 python.exe: ${pyPath}`);
         return { exe: pyPath, isPython: true };
       }
 
-      logger.info(`从系统 PATH 找到 freecadcmd: ${cmdPath}`);
+      logger.info(TAG, `从系统 PATH 找到 freecadcmd: ${cmdPath}`);
       return { exe: cmdPath, isPython: false };
     }
   } catch {
@@ -62,11 +64,11 @@ export async function findFreeCADCmd(): Promise<{ exe: string; isPython: boolean
       const cmdPath = path.join(binDir, 'freecadcmd.exe');
 
       if (await fileUtils.exists(pyPath)) {
-        logger.info(`从注册表找到 FreeCAD Python 解释器: ${pyPath}`);
+        logger.info(TAG, `从注册表找到 FreeCAD Python 解释器: ${pyPath}`);
         return { exe: pyPath, isPython: true };
       }
       if (await fileUtils.exists(cmdPath)) {
-        logger.info(`从注册表找到 FreeCAD: ${cmdPath}`);
+        logger.info(TAG, `从注册表找到 FreeCAD: ${cmdPath}`);
         return { exe: cmdPath, isPython: false };
       }
     }
@@ -93,12 +95,12 @@ export async function findFreeCADCmd(): Promise<{ exe: string; isPython: boolean
 
           // 优先寻找 bin/python.exe，彻底避开 FreeCAD 1.0 的 -c/[no supported file format] 报错
           if (await fileUtils.exists(pyPath)) {
-            logger.info(`从常见目录找到 FreeCAD Python: ${pyPath}`);
+            logger.info(TAG, `从常见目录找到 FreeCAD Python: ${pyPath}`);
             return { exe: pyPath, isPython: true };
           }
 
           if (await fileUtils.exists(cmdPath)) {
-            logger.info(`从常见目录找到 FreeCAD Command: ${cmdPath}`);
+            logger.info(TAG, `从常见目录找到 FreeCAD Command: ${cmdPath}`);
             return { exe: cmdPath, isPython: false };
           }
         }

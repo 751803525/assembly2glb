@@ -8,26 +8,25 @@ import { fileUtils } from '@/utils/file.js';
 
 const TAG = 'convert';
 /**
- * 步骤2：解析 STEP 文件，输出 tree.json 和零件文件（STL 中间格式，随后转为 GLB）
+ * 步骤2：解析 STEP 文件，输出 tree.json 和 叶子节点文件 GLB
  */
 export async function convertStep(config: PipelineConfig, pythonPath: string): Promise<string> {
-  const { inputPath, outputDir } = config;
-  logger.info('convert', `解析: ${inputPath}`);
+  const { inputPath, outputDir, precision } = config;
   const ext = path.extname(inputPath).toLocaleLowerCase();
   // 1 转码
-  logger.info('convert', `转码`);
+  logger.info(TAG, `转码${inputPath}`);
   let encodingPath = await fileEncoding(
     inputPath,
     path.join(outputDir, 'convert-step-encoding', `temp${ext}`)
   );
-  logger.info('convert', `转码文件暂存路径：${encodingPath}`);
+  logger.info(TAG, `转码文件暂存路径：${encodingPath}`);
   // 2 抽取结构树与 glb
-  logger.info('convert', `抽取结构树`);
+  logger.info(TAG, `抽取结构树`);
   const splitDir = path.join(outputDir, 'convert-split-part');
   await fileUtils.emptyDir(splitDir);
   await spawn(
     pythonPath,
-    [cad_splitter, encodingPath, path.join(splitDir, 'assembly-tree.json'), '0.2'],
+    [cad_splitter, encodingPath, path.join(splitDir, 'assembly-tree.json'), precision.toString()],
     {},
     TAG
   );

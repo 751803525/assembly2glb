@@ -30,34 +30,34 @@ export async function runPipeline(
     result.data
   );
 
-  logger.info(TAG, `解析结果:${cacheDir}`);
+  logger.info(TAG, `解析完成`);
   // 开始减面
   if (simplify > 0 && simplify < 100) {
-    logger.info(TAG, `减面:${cacheDir}`);
+    logger.info(TAG, `开始减面`);
     cacheDir = await simplifyGlb({
       ...config,
       inputPath: cacheDir,
       outputDir: path.join(tempDir, 'simplify'),
     });
-    logger.info(TAG, `减面结果:${cacheDir}`);
+    logger.info(TAG, `减面完成`);
   }
   if (dedup) {
-    logger.info(TAG, `去重:${cacheDir}`);
+    logger.info(TAG, `开始去重`);
     // 去重分析
     cacheDir = await dedupGlb({
       ...config,
       inputPath: cacheDir,
       outputDir: path.join(tempDir, 'dedup'),
     });
-    logger.info(TAG, `去重结果:${cacheDir}`);
+    logger.info(TAG, `去重完成`);
   }
+  logger.info(TAG, '开始写入，准备写入到输出目录');
   await fileUtils.emptyDir(outputDir);
-  logger.info(TAG, '导出完成，准备写入到输出目录');
   await fileUtils.copy(cacheDir, outputDir);
   if (!keepTemp) {
     await fileUtils.remove(tempDir);
   }
-  logger.info(TAG, `操作完成，输出到目录:${outputDir}`);
+  logger.info(TAG, `操作完成，输出目录:${outputDir}`);
   return {
     code: 0,
     message: 'ok',
