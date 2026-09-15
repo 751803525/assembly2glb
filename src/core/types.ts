@@ -3,7 +3,6 @@ export interface PipelineConfig {
   outputDir: string;
   simplify: number;
   dedup: boolean;
-  mode: 'merged' | 'split' | 'both';
   keepTemp: boolean;
 }
 

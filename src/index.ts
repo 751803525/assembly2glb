@@ -11,7 +11,6 @@ program
   .option('-o, --output <dir>', '输出目录（默认: ./output）')
   .option('-s, --simplify [number]', '执行减面操作')
   .option('-d, --dedup', '执行去重操作')
-  .option('-m, --mode [mode]', '输出模式: merged | split | both（需要包含步骤6）')
   .option('--keep-temp', '保留临时文件（调试用）')
   .action(async (options) => {
     try {

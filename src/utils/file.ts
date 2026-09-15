@@ -37,10 +37,14 @@ export const fileUtils = {
     }
   ): Promise<string> {
     try {
-      if (!(await fileUtils.exists(to))) {
-        fileUtils.ensureDir(to);
+      if (fs.statSync(from).isFile()) {
+        const dir = path.dirname(to);
+        await fileUtils.ensureDir(dir);
+        await fs.copyFile(from, to);
+      } else {
+        await fileUtils.ensureDir(to);
+        await fs.copy(from, to, opt);
       }
-      fs.copy(from, to, opt);
       return to;
     } catch (e: any) {
       throw e;
@@ -73,5 +77,22 @@ export const fileUtils = {
         .on('finish', () => resolve())
         .on('error', (err: any) => reject(err));
     });
+  },
+
+  readdir: async function (dir: string, suffix?: string): Promise<string[]> {
+    if (!this.exists(dir)) {
+      return [] as string[];
+    }
+    if (!(await fs.stat(dir)).isDirectory()) {
+      return [] as string[];
+    }
+    let result = await fs.readdir(dir, { encoding: 'utf-8' });
+    if (suffix) {
+      result.filter((name) => {
+        const ext = path.extname(name).toLocaleLowerCase();
+        return ext == suffix.toLocaleLowerCase();
+      });
+    }
+    return result.map((name) => path.join(dir, name));
   },
 };

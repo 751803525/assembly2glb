@@ -55,28 +55,6 @@ export async function processCommand(options: ProcessOptions): Promise<void> {
   }
   let dedup = options.dedup == true;
 
-  let mode: 'merged' | 'split' | 'both' = 'both';
-
-  if (options.mode) {
-    // 命令行明确指定了步骤
-    if (typeof options.mode == 'string') {
-      mode = options.mode;
-    } else {
-      const answer = await inquirer.prompt({
-        type: 'list', // 改为单选列表类型
-        name: 'mode', // 对应的返回字段名
-        message: '请选择输出模式:',
-        choices: [
-          { name: '合并模式 (merged)', value: 'merged' },
-          { name: '拆分模式 (split)', value: 'split' },
-          { name: '同时输出 (both)', value: 'both' },
-        ],
-        default: 'both', // 默认选中项的 value
-      });
-      mode = answer.mode;
-    }
-  }
-
   let keepTemp = options.keepTemp || false;
 
   // 6. 构建并执行流水线
@@ -85,7 +63,6 @@ export async function processCommand(options: ProcessOptions): Promise<void> {
     outputDir,
     simplify,
     dedup,
-    mode,
     keepTemp,
   };
   logger.info('process', config);

@@ -1,12 +1,12 @@
-import type { PipelineConfig } from '../types.js';
-import { convertStep } from '../steps/convert-step.js';
-import { logger } from '../../cli/logger.js';
-import { tempDir } from '../../utils/temp-path.js';
+import { logger } from '@/cli/logger.js';
+import { fileUtils } from '@/utils/file.js';
+import { tempDir } from '@/utils/temp-path.js';
 import path from 'path';
-import { simplifyGlb } from '../steps/simplify-glb.js';
-import { dedupGlb } from '../steps/dedup-glb.js';
-import { fileUtils } from '../../utils/file.js';
-import { checkLocalEnvironment } from '../steps/check-occ-env.js';
+import { checkLocalEnvironment } from '@/core/steps/check-occ-env.js';
+import { convertStep } from '@/core/steps/convert-step.js';
+import { dedupGlb } from '@/core/steps/dedup-glb.js';
+import { simplifyGlb } from '@/core/steps/simplify-glb.js';
+import { PipelineConfig } from '@/core/types.js';
 
 const TAG = 'pipeline';
 
@@ -19,7 +19,7 @@ export async function runPipeline(
     return { code: 1, message: result.message };
   }
 
-  const { inputPath, outputDir, simplify, dedup, mode, keepTemp } = config;
+  const { inputPath, outputDir, simplify, dedup, keepTemp } = config;
 
   logger.info(TAG, `解析:${inputPath}`);
   let cacheDir = await convertStep(
@@ -32,7 +32,7 @@ export async function runPipeline(
 
   logger.info(TAG, `解析结果:${cacheDir}`);
   // 开始减面
-  if (simplify > 0) {
+  if (simplify > 0 && simplify < 100) {
     logger.info(TAG, `减面:${cacheDir}`);
     cacheDir = await simplifyGlb({
       ...config,
@@ -50,10 +50,6 @@ export async function runPipeline(
       outputDir: path.join(tempDir, 'dedup'),
     });
     logger.info(TAG, `去重结果:${cacheDir}`);
-  }
-
-  if (mode == 'merged') {
-  } else if (mode == 'both') {
   }
 
   await fileUtils.copy(cacheDir, outputDir);

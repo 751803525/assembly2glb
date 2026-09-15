@@ -21,22 +21,15 @@ export async function convertStep(config: PipelineConfig, pythonPath: string): P
     path.join(outputDir, 'convert-step-encoding', `temp${ext}`)
   );
   logger.info('convert', `转码文件暂存路径：${encodingPath}`);
-  // 2 抽取结构树
+  // 2 抽取结构树与 glb
   logger.info('convert', `抽取结构树`);
-  const startTime = new Date();
   const splitDir = path.join(outputDir, 'convert-split-part');
   await fileUtils.emptyDir(splitDir);
   await spawn(
     pythonPath,
-    [cad_splitter, encodingPath, path.join(splitDir, 'assembly-tree.json')],
+    [cad_splitter, encodingPath, path.join(splitDir, 'assembly-tree.json'), '0.2'],
     {},
     TAG
   );
-  logger.info(TAG, `开始时间：${startTime.toISOString()}`);
-  logger.info(TAG, `结束时间：${new Date().toISOString()}`);
-  // logger.info('convert', `查到的零件数量: ${totalMeshesCount}`);
-  // const tempOut = path.join(outputDir, 'convert-split-part');
-  // await fileUtils.writeFile(path.resolve(tempOut, 'assembly-tree.json'), tree);
-  // await exportPartGlbAll(encodingPath, tree, tempOut);
-  return outputDir;
+  return splitDir;
 }
