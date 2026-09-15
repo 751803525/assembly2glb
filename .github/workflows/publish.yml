@@ -5,14 +5,18 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '只测试，不真正发布'
+        type: boolean
+        default: true
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write          # Trusted Publisher 需要
-
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -21,21 +25,25 @@ jobs:
         with:
           version: 9
 
-      - name: 设置 Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org/'
           cache: 'pnpm'
 
-      - name: 升级 npm 到最新版
+      - name: 升级 npm
         run: npm install -g npm@latest
 
-      - name: 安装依赖
-        run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
 
-      - name: 构建
-        run: pnpm run build
+      - name: 预览将要发布的包
+        run: npm pack --dry-run
 
-      - name: 发布到 npm
+      - name: 发布到 npm（dry-run）
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: npm publish --access public --dry-run
+
+      - name: 发布到 npm（真实发布）
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run) }}
         run: npm publish --access public
