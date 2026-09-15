@@ -1,6 +1,6 @@
 {
-  "name": "cadlite",
-  "version": "0.1.0",
+  "name": "@chanleeeee/cadlite",
+  "version": "0.1.1",
   "description": "Industrial CAD to Web 3D lightweight pipeline",
   "type": "module",
   "main": "dist/index.js",
@@ -17,6 +17,9 @@
     "format": "prettier --write src/**/*.ts",
     "prepublishOnly": "npm run rebuild"
   },
+  "files": [
+    "dist"
+  ],
   "keywords": [
     "cad",
     "step",
