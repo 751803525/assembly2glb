@@ -1,6 +1,6 @@
 {
   "name": "@chanleeeee/cadlite",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Industrial CAD to Web 3D lightweight pipeline",
   "type": "module",
   "main": "dist/index.js",
