@@ -28,6 +28,7 @@
     "gltf",
     "optimization"
   ],
+  "packageManager": "pnpm@9.15.0",
   "tsc-alias": {
     "resolveFullPaths": true,
     "verbose": false
