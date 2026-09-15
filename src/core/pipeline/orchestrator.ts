@@ -54,10 +54,10 @@ export async function runPipeline(
   await fileUtils.emptyDir(outputDir);
   logger.info(TAG, '导出完成，准备写入到输出目录');
   await fileUtils.copy(cacheDir, outputDir);
-  logger.info(TAG, `操作完成，输出到目录:${outputDir}`);
   if (!keepTemp) {
     await fileUtils.remove(tempDir);
   }
+  logger.info(TAG, `操作完成，输出到目录:${outputDir}`);
   return {
     code: 0,
     message: 'ok',
