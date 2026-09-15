@@ -1,11 +1,10 @@
-import fs from 'fs';
 import path from 'path';
 import { NodeIO } from '@gltf-transform/core';
-import { weld, simplify, tangents } from '@gltf-transform/functions';
+import { weld, simplify } from '@gltf-transform/functions';
 import { MeshoptSimplifier, MeshoptDecoder } from 'meshoptimizer'; // 引入 MeshoptDecoder
 
-import { logger } from '../../cli/logger.js';
-import { PipelineConfig } from '../types.js';
+import { logger } from '@/utils/logger.js';
+import { PipelineConfig } from './types.js';
 import { fileUtils } from '@/utils/file.js';
 import { emptyDir } from 'fs-extra';
 

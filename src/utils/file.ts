@@ -1,7 +1,7 @@
 import fs from 'fs-extra';
 import path from 'node:path';
 import bfj from 'bfj';
-import { logger } from '../cli/logger.js';
+import { logger } from '@/utils/logger.js';
 
 export const fileUtils = {
   exists: async function (filePath: string): Promise<boolean> {

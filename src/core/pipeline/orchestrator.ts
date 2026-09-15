@@ -1,4 +1,4 @@
-import { logger } from '@/cli/logger.js';
+import { logger } from '@/utils/logger.js';
 import { fileUtils } from '@/utils/file.js';
 import { tempDir } from '@/utils/temp-path.js';
 import path from 'path';
@@ -6,7 +6,7 @@ import { checkLocalEnvironment } from '@/core/steps/check-occ-env.js';
 import { convertStep } from '@/core/steps/convert-step.js';
 import { dedupGlb } from '@/core/steps/dedup-glb.js';
 import { simplifyGlb } from '@/core/steps/simplify-glb.js';
-import { PipelineConfig } from '@/core/types.js';
+import { PipelineConfig } from '@/core/steps/types.js';
 
 const TAG = 'pipeline';
 
@@ -51,8 +51,10 @@ export async function runPipeline(
     });
     logger.info(TAG, `去重结果:${cacheDir}`);
   }
-
+  await fileUtils.emptyDir(outputDir);
+  logger.info(TAG, '导出完成，准备写入到输出目录');
   await fileUtils.copy(cacheDir, outputDir);
+  logger.info(TAG, `操作完成，输出到目录:${outputDir}`);
   if (!keepTemp) {
     await fileUtils.remove(tempDir);
   }

@@ -1,5 +1,5 @@
 import inquirer from 'inquirer';
-import { logger } from '@/cli/logger.js';
+import { logger } from '@/utils/logger.js';
 import { runPipeline } from '@/core/pipeline/orchestrator.js';
 import type { PipelineConfig } from '@/core/types.js';
 

@@ -1,4 +1,4 @@
-import { logger } from '@/cli/logger.js';
+import { logger } from '@/utils/logger.js';
 import { ChildProcess, spawn as spawnImpl, exec as execImpl, SpawnOptions } from 'child_process';
 import { ExecException, ExecOptionsWithBufferEncoding } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
@@ -11,7 +11,7 @@ const spawn = (
 ) => {
   if (logTag) {
     const append = args ? ' ' + args.join(' ') : '';
-    logger.info(logTag, `执行指令：${command.trim()} ${append}`);
+    logger.info(logTag, `执行：${command.trim()} ${append}`);
   }
   return new Promise((resolve, reject) => {
     let child: ChildProcess = args

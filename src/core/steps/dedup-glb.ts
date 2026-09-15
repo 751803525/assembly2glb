@@ -1,5 +1,5 @@
-import { logger } from '@/cli/logger.js';
-import { PipelineConfig } from '../types.js';
+import { logger } from '@/utils/logger.js';
+import { PipelineConfig } from './types.js';
 
 /**
  * 费分析去重复

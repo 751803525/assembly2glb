@@ -1,8 +1,8 @@
-import { logger } from '@/cli/logger.js';
+import { logger } from '@/utils/logger.js';
 import path from 'path';
 import { fileEncoding } from '@/utils/encoding-utils.js';
-import { PipelineConfig } from '../types.js';
-import { cad_splitter } from '@/py/py-path.js';
+import { PipelineConfig } from './types.js';
+import { cad_splitter } from '@/scripts/py-path.js';
 import { spawn } from '@/utils/child-process-utils.js';
 import { fileUtils } from '@/utils/file.js';
 

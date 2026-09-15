@@ -1,6 +1,6 @@
 import path from 'path';
-import { logger } from '../cli/logger.js';
-import { fileUtils } from './file.js';
+import { logger } from '@/utils/logger.js';
+import { fileUtils } from '@/utils/file.js';
 import { promisify } from 'util';
 import { exec } from 'child_process';
 import fs from 'fs/promises';

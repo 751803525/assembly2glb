@@ -5,4 +5,4 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export const occt_split_to_glb = path.resolve(__dirname, './occt_split_to_glb.py');
+export const cad_splitter = path.resolve(__dirname, './cad_splitter.py');

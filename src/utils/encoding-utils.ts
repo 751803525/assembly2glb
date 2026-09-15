@@ -2,9 +2,7 @@ import fs from 'fs-extra';
 import chardet from 'chardet';
 import iconv from 'iconv-lite';
 import { pipeline } from 'node:stream/promises';
-
-import { logger } from '../cli/logger.js';
-import { fileUtils } from './file.js';
+import { fileUtils } from '@/utils/file.js';
 
 /**
  * 从文件头部提取连续的非 ASCII 字节片段并推测其编码
