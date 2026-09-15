@@ -1,7 +1,7 @@
 import inquirer from 'inquirer';
 import { logger } from '@/utils/logger.js';
 import { runPipeline } from '@/core/pipeline/orchestrator.js';
-import type { PipelineConfig } from '@/core/types.js';
+import { PipelineConfig } from '@/core/steps/types.js';
 
 interface ProcessOptions {
   input?: string;
