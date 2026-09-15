@@ -21,6 +21,7 @@ from OCC.Core.TopAbs import TopAbs_FACE
 from OCC.Core.TopoDS import topods
 from OCC.Core.BRep import BRep_Tool
 from OCC.Core.TopLoc import TopLoc_Location
+import hashlib
 
 
 def logger_info(msg: str):
@@ -37,18 +38,42 @@ def get_label_entry_str(label: TDF_Label) -> str:
     return entry_str.ToCString()
 
 
-def get_label_name(label: TDF_Label, default_name: str = "Node") -> str:
-    try:
-        name_attr = TDataStd_Name()
-        if label.FindAttribute(TDataStd_Name.GetID(), name_attr):
-            ext_str = name_attr.Get()
-            ascii_str = TCollection_AsciiString(ext_str)
-            name_str = ascii_str.ToCString()
-            if name_str and name_str.strip():
-                return name_str.strip()
-    except Exception:
-        pass
-    return default_name
+def get_label_name(
+    label: TDF_Label,
+    fallback_label: Optional[TDF_Label] = None,
+    default_name: str = "Node",
+) -> str:
+    """从 XCAF Label 中安全提取名称（支持 UTF-8 多字节中文、实例/定义双向回退）"""
+
+    def _extract_single(lbl: TDF_Label) -> str:
+        try:
+            name_attr = TDataStd_Name()
+            if lbl.FindAttribute(TDataStd_Name.GetID(), name_attr):
+                ext_str = name_attr.Get()
+                # 优先尝试现代 UTF-8 转码，避免中文丢失
+                if hasattr(ext_str, "ToUTF8"):
+                    utf8_str = ext_str.ToUTF8()
+                    if utf8_str and utf8_str.strip():
+                        return utf8_str.strip()
+                # 降级到 ASCII
+                ascii_str = TCollection_AsciiString(ext_str)
+                name_str = ascii_str.ToCString()
+                if name_str and name_str.strip():
+                    return name_str.strip()
+        except Exception:
+            pass
+        return ""
+
+    # 1. 尝试从主目标标签读取
+    name = _extract_single(label)
+
+    # 2. 如果没读到或结果是占位符，且存在备用标签（如定义实体标签），则回退查询
+    if (not name or name == "Node") and fallback_label and fallback_label != label:
+        fb_name = _extract_single(fallback_label)
+        if fb_name:
+            name = fb_name
+
+    return name if name else default_name
 
 
 def decompose_trsf(trsf: gp_Trsf) -> Tuple[List[float], List[float], List[float]]:
@@ -242,8 +267,10 @@ class StepToGlbConverter:
         if shape.IsNull():
             return None
 
-        # 用 Label 的 Entry 作为绝对唯一文件名 (如 0_1_1_2.glb)
-        safe_filename = label_entry.replace(":", "_") + ".glb"
+        # 用 Label 的 Entry 的 哈希值作为文件名
+        safe_filename = (
+            hashlib.sha1(label_entry.encode("utf-8")).hexdigest()[:16] + ".glb"
+        )
         glb_path = os.path.join(self.glb_dir, safe_filename)
 
         status = export_shape_to_glb_pure_python(shape, glb_path, self.deflection)
@@ -262,7 +289,9 @@ class StepToGlbConverter:
     ) -> Optional[Dict[str, Any]]:
         target_label = instance_label if instance_label else label
         node_id = get_label_entry_str(target_label)
-        node_name = get_label_name(target_label, default_name="Node")
+        node_name = get_label_name(
+            target_label, fallback_label=label, default_name="Node"
+        )
         is_asm = self.shape_tool.IsAssembly(label)
 
         position = [0.0, 0.0, 0.0]
