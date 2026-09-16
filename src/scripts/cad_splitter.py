@@ -366,7 +366,7 @@ class StepToGlbConverter:
             self._generate_glbs_recursive(child)
 
     def run(self):
-        logger_info(f"正在载入 STEP 文件")
+        logger_info(f"正在载入文件")
         reader = STEPCAFControl_Reader()
         reader.SetColorMode(True)
         reader.SetNameMode(True)

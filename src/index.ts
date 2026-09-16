@@ -2,7 +2,6 @@
 
 import { program } from 'commander';
 import { processCommand } from '@/cli/commands/process.js';
-import { logger } from './utils/logger.js';
 
 program
   .command('process')
@@ -17,8 +16,7 @@ program
     try {
       await processCommand(options);
     } catch (error) {
-      logger.error('process', error instanceof Error ? error.message : String(error));
-      process.exit(1);
+      throw error;
     }
   });
 

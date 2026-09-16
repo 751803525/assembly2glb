@@ -1,6 +1,6 @@
 import { logger } from '@/utils/logger.js';
 import path from 'path';
-import { fileEncoding } from '@/utils/encoding-utils.js';
+import { convertFileEncodingStream, detectNonAsciiEncoding } from '@/utils/encoding-utils.js';
 import { PipelineConfig } from './types.js';
 import { cad_splitter } from '@/scripts/py-path.js';
 import { spawn } from '@/utils/child-process-utils.js';
@@ -14,12 +14,19 @@ export async function convertStep(config: PipelineConfig, pythonPath: string): P
   const { inputPath, outputDir, precision } = config;
   const ext = path.extname(inputPath).toLocaleLowerCase();
   // 1 转码
-  logger.info(TAG, `转码${inputPath}`);
-  let encodingPath = await fileEncoding(
-    inputPath,
-    path.join(outputDir, 'convert-step-encoding', `temp${ext}`)
-  );
-  logger.info(TAG, `转码文件暂存路径：${encodingPath}`);
+  const encodding = await detectNonAsciiEncoding(inputPath);
+  let encodingPath = inputPath;
+  if (encodding !== 'UTF-8' && encodding != 'ASCII') {
+    logger.info(TAG, `转码${encodding} -> utf-8,原文件路径：${inputPath}`);
+    encodingPath = await convertFileEncodingStream(
+      inputPath,
+      path.join(outputDir, 'convert-step-encoding', `temp${ext}`),
+      encodding,
+      'utf-8'
+    );
+    logger.info(TAG, `转码文件暂存路径：${encodingPath}`);
+  }
+
   // 2 抽取结构树与 glb
   logger.info(TAG, `抽取结构树`);
   const splitDir = path.join(outputDir, 'convert-split-part');

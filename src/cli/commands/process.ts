@@ -1,19 +1,17 @@
 import inquirer from 'inquirer';
 import { runPipeline } from '@/core/pipeline/orchestrator.js';
 import { PipelineConfig } from '@/core/steps/types.js';
-import { logger } from '@/utils/logger.js';
 
 interface ProcessOptions {
   input?: string;
   output?: string;
   simplify?: string | boolean;
   dedup?: boolean;
-  precision?: string;
-  keepTemp?: boolean;
+  precision?: string | boolean;
+  keepTemp?: boolean | boolean;
 }
 
 export async function processCommand(options: ProcessOptions): Promise<void> {
-  logger.info('process', { options });
   // 1. 处理输入文件路径（参数优先，缺失则交互）
   let inputPath = options.input;
   if (!inputPath) {
@@ -40,7 +38,7 @@ export async function processCommand(options: ProcessOptions): Promise<void> {
   }
   // 3. 导出模型精度
   let precision = 0.2;
-  if (!options.precision) {
+  if (options.precision) {
     // 命令行明确指定了步骤
     if (typeof options.precision == 'string') {
       precision = parseFloat(options.precision);
@@ -55,8 +53,8 @@ export async function processCommand(options: ProcessOptions): Promise<void> {
     }
   }
   // 3. 减面参数
-  let simplify = -1;
-  if (!options.simplify) {
+  let simplify = 0;
+  if (options.simplify) {
     // 命令行明确指定了步骤
     if (typeof options.simplify == 'string') {
       simplify = parseInt(options.simplify);
