@@ -66,44 +66,6 @@ const verifyOccRuntime = async (pythonPath: string): Promise<boolean> => {
     return false;
   }
 };
-
-// ====================================================================
-// DEBUG-PROBE-BEGIN（临时调试桩，发布前整块删除）
-// --------------------------------------------------------------------
-// 用途：锁版本调试阶段，调用 probe-key-apis.py 探测业务依赖的关键 API
-// 默认不自动调用；需要时在 checkLocalEnvironment 里手动解注释
-// 删除范围：
-//   1. 本注释块 + probeKeyApis 函数
-//   2. checkLocalEnvironment 里对 probeKeyApis 的调用（如果有）
-//   3. env-check.ts 顶部 `import { probe_key_apis } ...`
-//   4. src/scripts/py-path.js 里的 probe_key_apis 导出
-//   5. src/scripts/probe-key-apis.py 文件本身
-// ====================================================================
-
-/**
- * 【调试】调用独立 python 脚本探测关键 API 可用性
- * 需要时由调用方手动触发（默认不自动执行）
- */
-const probeKeyApis = async (pythonPath: string): Promise<void> => {
-  // 脚本不存在就跳过（比如发布版已经删了）
-  if (!fs.existsSync(probe_key_apis)) {
-    logger.warn(TAG, `【调试】探测脚本不存在，跳过: ${probe_key_apis}`);
-    return;
-  }
-
-  logger.info(TAG, `【调试】开始探测关键 API (${path.basename(probe_key_apis)}) ...`);
-  try {
-    await spawn(pythonPath, [probe_key_apis], {}, TAG);
-    logger.info(TAG, '【调试】关键 API 探测完成');
-  } catch (err) {
-    logger.warn(TAG, `【调试】关键 API 探测过程中出现异常: ${err}`);
-  }
-};
-
-// ====================================================================
-// DEBUG-PROBE-END
-// ====================================================================
-
 // =====================================================================
 // Conda 与环境操作
 // =====================================================================
@@ -294,17 +256,6 @@ export const checkLocalEnvironment = async (): Promise<EnvCheckResult | EnvCheck
   // 2. 检查现有环境
   const existing = await checkExistingEnv(condaBaseDir);
   if (existing.success) {
-    // ================================================================
-    // DEBUG-PROBE-BEGIN（临时调试桩，发布前整块删除）
-    // ----------------------------------------------------------------
-    // 用途：手动开启后，逐项探测业务依赖的关键 API 可用性
-    // 需要时解注释下一行；默认关闭以免拖慢每次启动
-    // ================================================================
-    // await probeKeyApis(existing.data);
-    // ================================================================
-    // DEBUG-PROBE-END
-    // ================================================================
-
     return existing;
   }
 
