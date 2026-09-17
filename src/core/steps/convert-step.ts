@@ -2,7 +2,7 @@ import { logger } from '@/utils/logger.js';
 import path from 'path';
 import { convertFileEncodingStream, detectNonAsciiEncoding } from '@/utils/encoding-utils.js';
 import { PipelineConfig } from './types.js';
-import { cad_splitter } from '@/scripts/py-path.js';
+import { cad_splitter } from '@/scripts/index.js';
 import { spawn } from '@/utils/child-process-utils.js';
 import { fileUtils } from '@/utils/file.js';
 

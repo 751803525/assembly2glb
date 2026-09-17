@@ -2,7 +2,7 @@ import { logger } from '@/utils/logger.js';
 import { fileUtils } from '@/utils/file.js';
 import { tempDir } from '@/utils/temp-path.js';
 import path from 'path';
-import { checkLocalEnvironment } from '@/core/steps/check-occ-env.js';
+import { checkLocalEnvironment } from '@/core/steps/env-check.js';
 import { convertStep } from '@/core/steps/convert-step.js';
 import { dedupGlb } from '@/core/steps/dedup-glb.js';
 import { simplifyGlb } from '@/core/steps/simplify-glb.js';
