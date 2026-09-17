@@ -3,14 +3,26 @@ import { ChildProcess, spawn as spawnImpl, exec as execImpl, SpawnOptions } from
 import { ExecException, ExecOptionsWithBufferEncoding } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import * as iconv from 'iconv-lite';
-const spawn = (command: string, args?: string[], options?: SpawnOptions, logTag?: string) => {
+const spawn = (
+  command: string,
+  args?: (string | undefined)[],
+  options?: SpawnOptions,
+  logTag?: string
+) => {
+  const fliterUndefined = (s?: (string | undefined)[]): string[] | undefined => {
+    return s?.filter((item) => {
+      return item != null || item != undefined;
+    });
+  };
+  const realArgs = fliterUndefined(args);
   if (logTag) {
-    const append = args ? ' ' + args.join(' ') : '';
+    const append = realArgs ? ' ' + realArgs.join(' ') : '';
     logger.info(logTag, `执行：${command.trim()} ${append}`);
   }
+
   return new Promise((resolve, reject) => {
-    let child: ChildProcess = args
-      ? spawnImpl(command.trim(), args, {
+    let child: ChildProcess = realArgs
+      ? spawnImpl(command.trim(), realArgs, {
           ...options,
           env: {
             ...options?.env,
@@ -52,7 +64,10 @@ const spawn = (command: string, args?: string[], options?: SpawnOptions, logTag?
       if (code === 0) {
         resolve({ code });
       } else {
-        reject(new Error(`${logTag || ''}进程异常退出，退出码: ${code}`));
+        reject({
+          code,
+          message: `${logTag || ''} 进程异常退出，退出码: ${code}`,
+        });
       }
     });
     child.on('error', (err) => {

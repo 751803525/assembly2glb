@@ -46,6 +46,94 @@ FILENAME_NAME_MAX_LEN = 80
 # entry hash 的短长度，保证同名零件不冲突
 FILENAME_HASH_LEN = 8
 
+# 兜底换算系数：探测失败时假设 STEP 是 mm，glTF 是米
+FALLBACK_UNIT_TO_METER = 0.001
+
+# SI 词头 → 米
+_SI_PREFIX_TO_METER = {
+    "": 1.0,
+    "$": 1.0,
+    "MILLI": 0.001,
+    "CENTI": 0.01,
+    "DECI": 0.1,
+    "DEKA": 10.0,
+    "HECTO": 100.0,
+    "KILO": 1000.0,
+    "MICRO": 1e-6,
+    "NANO": 1e-9,
+}
+
+# 常见英制单位 → 米
+_NAMED_UNIT_TO_METER = {
+    "INCH": 0.0254,
+    "FOOT": 0.3048,
+    "YARD": 0.9144,
+    "MILE": 1609.344,
+    "MIL": 2.54e-5,
+    "THOU": 2.54e-5,
+}
+
+
+# =====================================================================
+# STEP 单位探测
+# =====================================================================
+
+
+def detect_step_length_unit(step_path: str) -> Optional[float]:
+    """
+    从 STEP 文件解析长度单位
+
+    读取策略：
+        STEP 的 LENGTH_UNIT 声明可能出现在文件头部（罕见）或尾部（常见，
+        通常与 GLOBAL_UNIT_ASSIGNED_CONTEXT 一起出现在文件末尾）。
+        因此同时读取头部和尾部各 1MB 进行匹配。
+
+    返回：1 个模型单位等于多少米；无法识别时返回 None
+    """
+    CHUNK = 1024 * 1024  # 1 MB
+
+    try:
+        file_size = os.path.getsize(step_path)
+        with open(step_path, "rb") as f:
+            head = f.read(min(CHUNK, file_size))
+            tail = b""
+            if file_size > CHUNK:
+                f.seek(max(0, file_size - CHUNK))
+                tail = f.read()
+    except Exception as e:
+        logger_err(f"[unit-detect] 读取 STEP 失败: {e}")
+        return None
+
+    text = (head + b"\n" + tail).decode("utf-8", errors="ignore")
+
+    # ---- 形式 1：长度 SI 单位 ----
+    m = re.search(
+        r"LENGTH_UNIT\s*\([^)]*\)[^;]*?SI_UNIT\s*\(\s*([^,]*?)\s*,\s*\.METRE\.\s*\)",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if m:
+        prefix = m.group(1).strip().strip(".").upper()
+        if prefix in _SI_PREFIX_TO_METER:
+            return _SI_PREFIX_TO_METER[prefix]
+        logger_err(f"[unit-detect] 未知 SI 词头: {prefix!r}")
+        return None
+
+    # ---- 形式 2：长度英制单位 ----
+    m = re.search(
+        r"LENGTH_UNIT\s*\([^)]*\)[^;]*?CONVERSION_BASED_UNIT\s*\(\s*'([^']+)'",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if m:
+        unit_name = m.group(1).strip().upper()
+        if unit_name in _NAMED_UNIT_TO_METER:
+            return _NAMED_UNIT_TO_METER[unit_name]
+        logger_err(f"[unit-detect] 未知长度单位: {unit_name!r}")
+        return None
+
+    return None
+
 
 # =====================================================================
 # 名字读取工具
@@ -114,6 +202,17 @@ class StepToGlbConverter:
 
         self.deflection = deflection
 
+        # 探测 STEP 单位，失败则用 mm 兜底
+        detected = detect_step_length_unit(self.step_path)
+        if detected is None:
+            self.unit_scale = FALLBACK_UNIT_TO_METER
+            logger_info(
+                f"未探测到 STEP 单位，按 mm 兜底处理 " f"(× {FALLBACK_UNIT_TO_METER})"
+            )
+        else:
+            self.unit_scale = detected
+            logger_info(f"STEP 单位探测成功：1 单位 = {detected} 米")
+
         self.doc = TDocStd_Document("MDTV-XCAF")
         self.shape_tool = None
 
@@ -140,11 +239,8 @@ class StepToGlbConverter:
         """
         if not name:
             return ""
-        # 替换非法字符
         s = re.sub(r'[\\/:*?"<>|\r\n\t]', "_", name)
-        # 只保留可打印字符
         s = "".join(c for c in s if c.isprintable())
-        # 折叠多个连续下划线
         s = re.sub(r"_+", "_", s)
         return s.strip(" ._")
 
@@ -152,12 +248,23 @@ class StepToGlbConverter:
     # 变换工具
     # -----------------------------------------------------------------
 
-    @staticmethod
     def _decompose_trsf(
+        self,
         trsf: gp_Trsf,
     ) -> Tuple[List[float], List[float], List[float]]:
+        """
+        分解 gp_Trsf 为 position / quaternion / scale
+
+        注意：
+            position 按 self.unit_scale 换算到米，与顶点坐标一致；
+            scale 是无量纲比例，不换算。
+        """
         t = trsf.TranslationPart()
-        position = [t.X(), t.Y(), t.Z()]
+        position = [
+            t.X() * self.unit_scale,
+            t.Y() * self.unit_scale,
+            t.Z() * self.unit_scale,
+        ]
 
         q = trsf.GetRotation()
         quaternion = [q.X(), q.Y(), q.Z(), q.W()]
@@ -172,7 +279,11 @@ class StepToGlbConverter:
     # -----------------------------------------------------------------
 
     def _export_shape_to_glb(self, shape, output_glb_path: str) -> bool:
-        """把单个 shape 三角化并写成 GLB"""
+        """
+        把单个 shape 三角化并写成 GLB
+
+        顶点坐标按 self.unit_scale 换算，去重 key 用换算后的值。
+        """
         mesh = BRepMesh_IncrementalMesh(shape, self.deflection, False, 0.5, True)
         mesh.Perform()
 
@@ -195,10 +306,15 @@ class StepToGlbConverter:
                     if not loc.IsIdentity():
                         p.Transform(trsf)
 
-                    key = (round(p.X(), 4), round(p.Y(), 4), round(p.Z(), 4))
+                    # 换算到米
+                    px = p.X() * self.unit_scale
+                    py = p.Y() * self.unit_scale
+                    pz = p.Z() * self.unit_scale
+
+                    key = (round(px, 4), round(py, 4), round(pz, 4))
                     if key not in vertex_map:
                         vertex_map[key] = len(vertices) // 3
-                        vertices.extend([p.X(), p.Y(), p.Z()])
+                        vertices.extend([px, py, pz])
                     local_to_global_idx[i] = vertex_map[key]
 
                 for i in range(1, triangulation.NbTriangles() + 1):
@@ -336,7 +452,7 @@ class StepToGlbConverter:
         if shape.IsNull():
             return None
 
-        # ---------- 构造文件名 ----------
+        # 构造文件名
         raw_name = (display_name or "").strip()
         if not raw_name:
             try:
@@ -394,7 +510,7 @@ class StepToGlbConverter:
             except Exception:
                 pass
 
-        # ---- 装配体 ----
+        # 装配体
         if is_asm:
             components = TDF_LabelSequence()
             self.shape_tool.GetComponents(label, components)
@@ -431,7 +547,7 @@ class StepToGlbConverter:
                 "asset": None,
             }
 
-        # ---- 零件 ----
+        # 零件
         return {
             "id": node_id,
             "name": node_name,
@@ -449,7 +565,6 @@ class StepToGlbConverter:
     def _generate_glbs_recursive(self, node: Dict[str, Any]):
         if node["type"] == "part" and "_label_ref" in node:
             label = node.pop("_label_ref")
-            # 把已提取的节点名作为文件名首选
             node["asset"] = self._export_atomic_glb_with_cache(
                 label, display_name=node.get("name")
             )
