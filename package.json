@@ -1,6 +1,6 @@
 {
   "name": "@chanleeeee/assembly2glb",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Convert industrial STEP assemblies to glTF/GLB for web 3D — split, dedup, simplify, and merge large CAD models",
   "type": "module",
   "main": "dist/index.js",
