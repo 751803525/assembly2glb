@@ -1,0 +1,3 @@
+# 所有 .py 文件不参与 GitHub 语言统计
+*.py linguist-detectable=false
+*.pyi linguist-detectable=false
