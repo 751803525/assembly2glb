@@ -11,13 +11,6 @@ const CAD_ENV_NAME = 'cad_env';
 // 版本锁定
 // ------------------------------------------------------------
 // 目标环境：python=3.11 + pythonocc-core=7.7.2
-//
-// 关于 TDataStd_Name.Get 缺失：
-//   conda-forge 上 pythonocc-core 7.7.x / 7.9.x 的 SWIG
-//   绑定普遍缺少 TDataStd_Name.Get 方法。cad-splitter.py
-//   已改用 Handle_TDataStd_Name 方案绕过，因此此处不再将
-//   TDataStd_Name.Get 作为环境可用性的判定条件。
-//   具体 API 的可用性诊断由 probeKeyApis() 承担。
 // ============================================================
 const PYTHON_VERSION = '3.11';
 const PYTHONOCC_VERSION = '7.7.2';
@@ -240,9 +233,6 @@ const buildCadEnvFromScratch = async (
  *   2. 检查 cad_env 是否满足 [Python 版本 + OCC 版本] 双重要求
  *   3. 不满足 → 推倒重建（不做增量修复、不降级到系统 Python）
  *
- * 调试提示：
- *   若需要检查具体 API 的可用性（如 TDataStd_Name.Get、Handle 等），
- *   解注释下方 DEBUG-PROBE 块中的 probeKeyApis(existing.data) 调用。
  */
 export const checkLocalEnvironment = async (): Promise<EnvCheckResult | EnvCheckError> => {
   // 1. Conda 是硬性要求

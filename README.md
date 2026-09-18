@@ -228,7 +228,7 @@ const PYTHON_VERSION = '3.11';
 const PYTHONOCC_VERSION = '7.7.2';
 ```
 
-注意：`pythonocc-core` 的 SWIG 绑定质量参差不齐。**7.7.2 是当前经过验证的稳定版本**，7.9.0 及以上存在 `TDataStd_Name.Get` 缺失的问题（详见 FAQ Q2）。
+注意：`pythonocc-core` 的 SWIG 绑定质量参差不齐。**7.7.2 是当前经过验证的稳定版本**，其它版本请自行验证
 
 ---
 
@@ -243,21 +243,11 @@ conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/
 conda config --set channel_priority strict
 ```
 
-### Q2. 报错 `TDataStd_Name.Get 方法缺失`
-
-这是因为环境里装的是 pythonocc-core ≥ 7.9.0，SWIG 绑定有回归。执行：
-
-```bash
-conda env remove -n cad_env -y
-```
-
-然后再跑一次 `assembly2glb`，会自动装 7.7.2。
-
-### Q3. 输出的 GLB 在浏览器里显示特别大/特别小
+### Q2. 输出的 GLB 在浏览器里显示特别大/特别小
 
 正常情况下会自动把坐标换算成米。如果你看到模型尺寸明显不对（大了/小了 1000 倍），说明 STEP 文件里没有写单位声明，走了 mm 兜底。请在项目里开 issue 附上 STEP 文件头 200 行。
 
-### Q4. Windows 下报 `Errno 2` 或 `EBUSY`
+### Q3. Windows 下报 `Errno 2` 或 `EBUSY`
 
 这是 Windows 文件系统的目录项缓存延迟 + 杀软扫描导致的。已经做了以下防御：
 
@@ -267,17 +257,17 @@ conda env remove -n cad_env -y
 
 如果依然遇到，尝试给 `%TEMP%\assembly2glb\` 加杀软白名单。
 
-### Q5. 输出的 GLB 比 FreeCAD 导出的大/小
+### Q4. 输出的 GLB 比 FreeCAD 导出的大/小
 
 - FreeCAD 默认 deflection 更小（约 0.05），三角形数量更多，文件更大
 - assembly2glb 默认 `0.2`，用 `-p 0.05` 可对齐
 - 会做几何实例复用，文件通常比 FreeCAD 更小
 
-### Q6. 一个零件都没导出 / 全叫 `Node`
+### Q5. 一个零件都没导出 / 全叫 `Node`
 
 说明 STEP 里没有 PRODUCT name。会退化为 `{父名}_{index}` 命名，保证不重名。
 
-### Q7. 支持 IGES / BREP 吗？
+### Q6. 支持 IGES / BREP 吗？
 
 当前只支持 STEP。IGES、BREP 在 OCC 层面也能读（`IGESCAFControl_Reader` / `BRepTools`），后续会陆续支持。
 
