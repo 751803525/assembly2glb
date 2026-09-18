@@ -12,11 +12,7 @@ export const fileUtils = {
     }
   },
   ensureDir: async function (dir: string) {
-    try {
-      await fs.ensureDir(dir);
-    } catch (e: any) {
-      throw e;
-    }
+    await fs.ensureDir(dir);
   },
   remove: async function (dir: string): Promise<void> {
     if (await fileUtils.exists(dir)) {
@@ -36,19 +32,15 @@ export const fileUtils = {
       errorOnExist?: boolean;
     }
   ): Promise<string> {
-    try {
-      if (fs.statSync(from).isFile()) {
-        const dir = path.dirname(to);
-        await fileUtils.ensureDir(dir);
-        await fs.copyFile(from, to);
-      } else {
-        await fileUtils.ensureDir(to);
-        await fs.copy(from, to, opt);
-      }
-      return to;
-    } catch (e: any) {
-      throw e;
+    if (fs.statSync(from).isFile()) {
+      const dir = path.dirname(to);
+      await fileUtils.ensureDir(dir);
+      await fs.copyFile(from, to);
+    } else {
+      await fileUtils.ensureDir(to);
+      await fs.copy(from, to, opt);
     }
+    return to;
   },
   emptyDir: async function (p: string) {
     if (await fileUtils.exists(p)) {
@@ -86,7 +78,7 @@ export const fileUtils = {
     if (!(await fs.stat(dir)).isDirectory()) {
       return [] as string[];
     }
-    let result = await fs.readdir(dir, { encoding: 'utf-8' });
+    const result = await fs.readdir(dir, { encoding: 'utf-8' });
     if (suffix) {
       result.filter((name) => {
         const ext = path.extname(name).toLocaleLowerCase();
