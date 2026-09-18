@@ -9,6 +9,7 @@ interface ProcessOptions {
   dedup?: boolean;
   precision?: string | boolean;
   keepTemp?: boolean | boolean;
+  merge?: boolean | 'merge' | 'all';
 }
 
 export async function processCommand(options: ProcessOptions): Promise<void> {
@@ -37,7 +38,7 @@ export async function processCommand(options: ProcessOptions): Promise<void> {
     outputDir = answer.output;
   }
   // 3. 导出模型精度
-  let precision = 0.2;
+  let precision = 0.1;
   if (options.precision) {
     // 命令行明确指定了步骤
     if (typeof options.precision == 'string') {
@@ -47,7 +48,7 @@ export async function processCommand(options: ProcessOptions): Promise<void> {
         type: 'input',
         name: 'output',
         message: '模型精度:',
-        default: '0.2',
+        default: '0.1mm',
       });
       precision = parseFloat(answer.output);
     }
@@ -68,6 +69,27 @@ export async function processCommand(options: ProcessOptions): Promise<void> {
       simplify = parseInt(answer.output);
     }
   }
+
+  // 3. 减面参数
+  let mode: PipelineConfig['mode'] = 'split'; // 默认
+  if (options.merge) {
+    if (typeof options.merge === 'string') {
+      mode = options.merge; // 命令行传入
+    } else {
+      const answer = await inquirer.prompt({
+        type: 'list',
+        name: 'mode',
+        message: '请选择执行步骤:',
+        choices: [
+          { name: '仅拆分', value: 'split' },
+          { name: '仅合并', value: 'merge' },
+          { name: '全部（拆分 + 合并）', value: 'all' },
+        ],
+        default: 'split',
+      });
+      mode = answer.mode;
+    }
+  }
   let dedup = options.dedup == true;
 
   let keepTemp = options.keepTemp || false;
@@ -80,6 +102,7 @@ export async function processCommand(options: ProcessOptions): Promise<void> {
     dedup,
     precision,
     keepTemp,
+    mode,
   };
   const result = await runPipeline(config);
   if (result.code == 0) {

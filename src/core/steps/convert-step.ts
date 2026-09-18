@@ -2,7 +2,7 @@ import { logger } from '@/utils/logger.js';
 import path from 'path';
 import { convertFileEncodingStream, detectNonAsciiEncoding } from '@/utils/encoding-utils.js';
 import { PipelineConfig } from './types.js';
-import { cad_splitter } from '@/scripts/py-path.js';
+import { cad_splitter } from '@/scripts/index.js';
 import { spawn } from '@/utils/child-process-utils.js';
 import { fileUtils } from '@/utils/file.js';
 
@@ -13,6 +13,7 @@ const TAG = 'convert';
 export async function convertStep(config: PipelineConfig, pythonPath: string): Promise<string> {
   const { inputPath, outputDir, precision } = config;
   const ext = path.extname(inputPath).toLocaleLowerCase();
+  fileUtils.emptyDir(outputDir);
   // 1 转码
   const encodding = await detectNonAsciiEncoding(inputPath);
   let encodingPath = inputPath;

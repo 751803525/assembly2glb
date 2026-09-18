@@ -1,16 +1,21 @@
 import { PipelineConfig } from './types.js';
 import { fileUtils } from '@/utils/file.js';
 import { spawn } from '@/utils/child-process-utils.js';
-import { dedup } from '@/scripts/index.js';
-const TAG = 'dedup';
+import { merge_glb } from '@/scripts/index.js';
+
+const TAG = 'merge';
 /**
  * 费分析去重复
  */
-export async function dedupGlb(config: PipelineConfig, pythonPath: string): Promise<string> {
+export async function merge(
+  config: PipelineConfig,
+  pythonPath: string,
+  fileName?: string
+): Promise<string> {
   const { inputPath, outputDir } = config;
   await fileUtils.emptyDir(outputDir);
   // 2  合并glb
-  await spawn(pythonPath, [dedup, inputPath, outputDir], {}, TAG);
+  await spawn(pythonPath, [merge_glb, inputPath, outputDir, fileName], {}, TAG);
   if (config.mode == 'all') {
     fileUtils.copy(inputPath, outputDir);
   }

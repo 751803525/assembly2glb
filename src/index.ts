@@ -11,6 +11,7 @@ program
   .option('-p, --precision [number]', '导出模型精度')
   .option('-s, --simplify [number]', '执行减面操作')
   .option('-d, --dedup', '执行去重操作')
+  .option('-m, --merge [string]', '模型合并输出')
   .option('--keep-temp', '保留临时文件（调试用）')
   .action(async (options) => {
     try {

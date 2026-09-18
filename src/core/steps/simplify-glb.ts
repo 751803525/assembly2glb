@@ -6,7 +6,6 @@ import { MeshoptSimplifier, MeshoptDecoder } from 'meshoptimizer'; // 引入 Mes
 import { logger } from '@/utils/logger.js';
 import { PipelineConfig } from './types.js';
 import { fileUtils } from '@/utils/file.js';
-import { emptyDir } from 'fs-extra';
 
 const TAG = 'simplify';
 
@@ -81,7 +80,7 @@ export async function simplifyGlb(config: PipelineConfig): Promise<string> {
 
   const glbFiles = await fileUtils.readdir(path.join(inputPath, 'glbs'), 'glb');
   const outGlb = path.join(outputDir, 'glbs');
-  await emptyDir(outGlb);
+  await fileUtils.emptyDir(outGlb);
 
   // 使用 for...of 正确等待每一个异步简化任务完成
   for (const item of glbFiles) {
