@@ -23,6 +23,8 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+          # 千万不要写 registry-url
+          # 否则 setup-node 会往 .npmrc 写空 _authToken，顶掉 OIDC
 
       - run: pnpm install --frozen-lockfile
 
@@ -39,11 +41,14 @@ jobs:
           npm --version
           npm config list
 
-      - name: Strip empty authToken from .npmrc
+      - name: Clean .npmrc to allow OIDC
         run: |
-          if [ -f "$NPM_CONFIG_USERCONFIG" ]; then
-            sed -i '/_authToken/d' "$NPM_CONFIG_USERCONFIG"
-          fi
+          echo "--- Before cleaning ---"
+          cat "$NPM_CONFIG_USERCONFIG" || true
+          # 删除 setup-node 注入的空 _authToken 行
+          sed -i '/_authToken/d' "$NPM_CONFIG_USERCONFIG" || true
+          echo "--- After cleaning ---"
+          cat "$NPM_CONFIG_USERCONFIG" || true
 
       - name: Publish
         run: |
