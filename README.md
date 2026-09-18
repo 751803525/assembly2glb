@@ -2,8 +2,7 @@
 
 > 工业 CAD 装配体 → glTF/GLB 轻量化流水线
 
-[![npm version](https://img.shields.io/npm/v/assembly2glb)](https://www.npmjs.com/package/assembly2glb)
-[![license](https://img.shields.io/npm/l/assembly2glb)](./LICENSE)
+[![npm version](https://www.npmjs.com/package/@chanleeeee/assembly2glb)](https://www.npmjs.com/package/@chanleeeee/assembly2glb)
 [![node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org/)
 
 把工业级 **STEP** 装配体转换为 Web 3D 可直接使用的 **glTF/GLB** 资源，同时产出**完整的结构树 JSON**。
