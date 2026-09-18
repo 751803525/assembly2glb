@@ -38,12 +38,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/chanleeeee/cadlite.git"
+    "url": "git+https://github.com/751803525/assembly2glb.git"
   },
-  "homepage": "https://github.com/chanleeeee/cadlite#readme",
   "bugs": {
-    "url": "https://github.com/chanleeeee/cadlite/issues"
+    "url": "https://github.com/751803525/assembly2glb/issues"
   },
+  "homepage": "https://github.com/751803525/assembly2glb#readme",
   "packageManager": "pnpm@9.15.0",
   "tsc-alias": {
     "resolveFullPaths": true,
