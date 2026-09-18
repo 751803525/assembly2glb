@@ -15,7 +15,8 @@
     "start": "node dist/index.js",
     "lint": "eslint src/**/*.ts",
     "format": "prettier --write src/**/*.ts",
-    "prepublishOnly": "npm run rebuild"
+    "prepublishOnly": "npm run rebuild",
+    "postversion": "git push && git push --tags"
   },
   "files": [
     "dist"
