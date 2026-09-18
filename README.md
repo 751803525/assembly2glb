@@ -120,8 +120,8 @@ Options:
 |---|---|
 | `-i` | STEP 文件路径，支持绝对/相对路径 |
 | `-o` | 输出根目录，所有产物都在此目录下 |
-| `-p` | 三角化精度。数值越小越精细（三角形越多、文件越大）。默认 0.2 |
-| `-s` | 减面比例。`0.3` 表示减到 30%。不传则不减面 |
+| `-p` | 三角化精度。数值越小越精细（三角形越多、文件越大）。默认 0.1 |
+| `-s` | 减面比例。30 表示减到 30%。不传则不减面 |
 | `-d` | 是否执行去重（同一内容零件合并） |
 | `-m` | 合并模式：`split`=仅拆分、`merge`=仅合并、`all`=全部 |
 
@@ -132,10 +132,10 @@ Options:
 ### 示例 1：只解析 STEP，导出零件集合
 
 ```bash
-assembly2glb process -i ./assembly.stp -o ./out -p 0.1
+assembly2glb process -i ./assembly.stp -o ./out 
 ```
 
-产物：`out/convert/convert-split-part/assembly-tree.json` + `glbs/` 目录。
+产物：`out/assembly-tree.json` + `glbs/` 目录。
 
 ### 示例 2：解析 + 去重 + 合并
 
@@ -148,15 +148,7 @@ assembly2glb process \
   -m all
 ```
 
-产物：`out/merge/{顶层零件名}.glb`，可直接拖进 three.js / Babylon.js / 模型查看器。
-
-### 示例 3：只合并已有结果（不重新解析）
-
-如果你的 `dedup/` 或 `convert-split-part/` 已经存在：
-
-```bash
-assembly2glb process -i ./assembly.stp -o ./out -m merge
-```
+产物：`out/{顶层零件名}.glb`，可直接拖进 three.js / Babylon.js / 模型查看器。
 
 ---
 
