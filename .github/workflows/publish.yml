@@ -33,5 +33,5 @@ jobs:
         run: npm install -g npm@latest
 
       - name: Publish
-        run: npm publish --access public
+        run: npm stage publish --access public
         # 注意：不再需要 env: NODE_AUTH_TOKEN
