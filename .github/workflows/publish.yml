@@ -32,5 +32,4 @@ jobs:
         run: npm install -g npm@latest
 
       - name: Publish
-        run: npm stage publish --access public --provenance
-        # 注意：不再需要 env: NODE_AUTH_TOKEN
+        run: npm publish --access public --provenance
