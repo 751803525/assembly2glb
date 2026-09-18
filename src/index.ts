@@ -17,4 +17,7 @@ program
     await processCommand(options);
   });
 
+if (process.argv.length <= 2) {
+  program.help(); // 内部会 process.exit(0)
+}
 program.parse();

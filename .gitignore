@@ -5,4 +5,4 @@ output/
 *.log
 .DS_Store
 *.lock
-.cadlite-temp/
+.assembly2glb-temp/

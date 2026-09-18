@@ -521,7 +521,7 @@ class StepToGlbConverter:
         gltf_dict = {
             "asset": {
                 "version": "2.0",
-                "generator": "CADLite Pure Mesh Exporter",
+                "generator": "assembly2glb Pure Mesh Exporter",
             },
             "scene": 0,
             "scenes": [{"nodes": [0]}],

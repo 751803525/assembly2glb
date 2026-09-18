@@ -229,7 +229,7 @@ class GlbMerger:
         gltf: Dict[str, Any] = {
             "asset": {
                 "version": "2.0",
-                "generator": "CADLite Assembled GLB Merger (stream)",
+                "generator": "assembly2glb Assembled GLB Merger (stream)",
             },
             "scene": 0,
             "scenes": [{"nodes": root_indices}],
@@ -270,7 +270,6 @@ class GlbMerger:
             name = self._strip_glb_ext(self.raw_output_filename)
             safe = self._sanitize_filename(name)
             if safe:
-                logger_info(f"输出文件名来源: 命令行参数 ({safe})")
                 return safe
 
         if isinstance(tree, dict):
@@ -278,10 +277,7 @@ class GlbMerger:
             if top_name:
                 safe = self._sanitize_filename(str(top_name))
                 if safe:
-                    logger_info(f"输出文件名来源: 结构树顶级 name ({safe})")
                     return safe
-
-        logger_info(f"输出文件名来源: 兜底默认值 ({DEFAULT_OUTPUT_FILENAME})")
         return DEFAULT_OUTPUT_FILENAME
 
     # -----------------------------------------------------------------
@@ -308,7 +304,7 @@ class GlbMerger:
                 tree = json.load(f)
 
             self.output_filename_base = self._resolve_output_basename(tree)
-            logger_info(f"最终输出文件名: {self.output_filename_base}.glb")
+            logger_info(f"输出文件名: {self.output_filename_base}.glb")
 
             if isinstance(tree, list):
                 root_indices = [self._build_node(t) for t in tree]

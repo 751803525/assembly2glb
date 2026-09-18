@@ -63,7 +63,8 @@ export async function runPipeline(
         inputPath: cacheDir,
         outputDir: path.join(tempDir, 'merge'),
       },
-      result.data
+      result.data,
+      path.basename(inputPath)
     );
     logger.info(TAG, `合并完成`);
   }
