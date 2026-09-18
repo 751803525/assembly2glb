@@ -84,18 +84,12 @@ assembly2glb process \
 
 ```
 output/
-├── convert/
-│   └── convert-split-part/
-│       ├── assembly-tree.json      # 结构树
-│       └── glbs/                   # 每个零件的独立 GLB
-│           ├── 中间台体__9a957632.glb
-│           ├── 螺钉_M6__a1b2c3d4.glb
-│           └── ...
-├── dedup/
-│   ├── assembly-tree.json          # 去重后的结构树
-│   └── glbs/                       # 去重后的零件集合
-└── merge/
-    └── SH1_904_403891210001_ASM.glb   # 完整装配 GLB
+├──SH1_904_403891210001_ASM.glb   # 完整装配 GLB
+├── assembly-tree.json      # 结构树
+└── glbs/                   # 每个零件的独立 GLB
+    ├── 中间台体__9a957632.glb
+    ├── 螺钉_M6__a1b2c3d4.glb
+    └── ...
 ```
 
 ---
