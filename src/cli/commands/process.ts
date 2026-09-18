@@ -90,9 +90,9 @@ export async function processCommand(options: ProcessOptions): Promise<void> {
       mode = answer.mode;
     }
   }
-  let dedup = options.dedup == true;
+  const dedup = options.dedup == true;
 
-  let keepTemp = options.keepTemp || false;
+  const keepTemp = options.keepTemp || false;
 
   // 6. 构建并执行流水线
   const config: PipelineConfig = {

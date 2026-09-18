@@ -21,7 +21,7 @@ const spawn = (
   }
 
   return new Promise((resolve, reject) => {
-    let child: ChildProcess = realArgs
+    const child: ChildProcess = realArgs
       ? spawnImpl(command.trim(), realArgs, {
           ...options,
           env: {

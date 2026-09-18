@@ -49,13 +49,10 @@ async function simplifyKeepEdges(
     );
 
     // 记录简化后统计数据
-    let simplifiedVertices = 0;
     let simplifiedFaces = 0;
     for (const mesh of doc.getRoot().listMeshes()) {
       for (const prim of mesh.listPrimitives()) {
-        const pos = prim.getAttribute('POSITION');
         const indices = prim.getIndices();
-        if (pos) simplifiedVertices += pos.getCount();
         if (indices) simplifiedFaces += indices.getCount() / 3;
       }
     }

@@ -14,11 +14,7 @@ program
   .option('-m, --merge [string]', '模型合并输出')
   .option('--keep-temp', '保留临时文件（调试用）')
   .action(async (options) => {
-    try {
-      await processCommand(options);
-    } catch (error) {
-      throw error;
-    }
+    await processCommand(options);
   });
 
 program.parse();
