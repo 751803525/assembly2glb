@@ -38,7 +38,7 @@ export async function processCommand(options: ProcessOptions): Promise<void> {
     outputDir = answer.output;
   }
   // 3. 导出模型精度
-  let precision = 0.2;
+  let precision = 0.1;
   if (options.precision) {
     // 命令行明确指定了步骤
     if (typeof options.precision == 'string') {
@@ -48,7 +48,7 @@ export async function processCommand(options: ProcessOptions): Promise<void> {
         type: 'input',
         name: 'output',
         message: '模型精度:',
-        default: '0.2',
+        default: '0.1mm',
       });
       precision = parseFloat(answer.output);
     }

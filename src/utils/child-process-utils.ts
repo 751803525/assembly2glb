@@ -89,7 +89,7 @@ const exec = (
     return iconv.decode(Buffer.from(data), process.platform == 'win32' ? 'gbk' : 'utf-8').trim();
   };
   if (logTag) {
-    logger.info(logTag, `执行指令：${command}`);
+    logger.info(logTag, `执行：${command}`);
   }
   return new Promise<{ code: number; message: string }>((resolve, reject) => {
     execImpl(

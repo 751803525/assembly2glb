@@ -45,11 +45,14 @@ export async function runPipeline(
   if (dedup) {
     logger.info(TAG, `开始去重`);
     // 去重分析
-    cacheDir = await dedupGlb({
-      ...config,
-      inputPath: cacheDir,
-      outputDir: path.join(tempDir, 'dedup'),
-    });
+    cacheDir = await dedupGlb(
+      {
+        ...config,
+        inputPath: cacheDir,
+        outputDir: path.join(tempDir, 'dedup'),
+      },
+      result.data
+    );
     logger.info(TAG, `去重完成`);
   }
   if (mode != 'split') {

@@ -13,6 +13,7 @@ const TAG = 'convert';
 export async function convertStep(config: PipelineConfig, pythonPath: string): Promise<string> {
   const { inputPath, outputDir, precision } = config;
   const ext = path.extname(inputPath).toLocaleLowerCase();
+  fileUtils.emptyDir(outputDir);
   // 1 转码
   const encodding = await detectNonAsciiEncoding(inputPath);
   let encodingPath = inputPath;

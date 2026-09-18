@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { exec, spawn } from '@/utils/child-process-utils.js';
 import { logger } from '@/utils/logger.js';
-import { probe_key_apis, verify_occ } from '@/scripts/index.js';
+import { verify_occ } from '@/scripts/index.js';
 
 const TAG = 'env-check';
 const CAD_ENV_NAME = 'cad_env';

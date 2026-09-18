@@ -1,34 +1,6 @@
 """
 装配体 GLB 合并脚本（独立工具，流式合并版）
-
-用途：
-    把 cad-splitter.py 的输出目录（含结构树 JSON + glbs/ 子目录）
-    合并成一个完整的装配 GLB 文件，用于对外提供演示文件。
-
-内存特性：
-    流式合并，内存占用与装配体总大小无关（常数级缓冲）。
-    适合巨型装配（数百 MB ~ 数 GB）的合并场景。
-
-用法：
-    python merge-glb.py <输入目录> <输出目录> [输出文件名]
-
-输入目录结构：
-    <输入目录>/
-        ├─ assembly-tree.json     （结构树，自动发现 *.json）
-        └─ glbs/
-             ├─ xxx.glb
-             └─ yyy.glb
-
-输出文件名解析优先级：
-    1. 命令行第三参数（自动清洗非法字符 + 补 .glb 后缀）
-    2. 结构树 JSON 顶级对象的 name 字段
-    3. 常量 DEFAULT_OUTPUT_FILENAME（"assembly"）
-
-输出：
-    <输出目录>/{最终文件名}.glb
-
-依赖：
-    仅标准库（struct / json / os / glob / re / shutil / tempfile）
+...（其余文档字符串不变）
 """
 
 import os
@@ -50,10 +22,7 @@ def logger_err(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
-# 兜底输出文件名（无参数、JSON 也无 name 时使用）
 DEFAULT_OUTPUT_FILENAME = "assembly"
-
-# BIN 流式 copy 时的分块大小（4 MB）
 COPY_CHUNK_SIZE = 4 * 1024 * 1024
 
 
@@ -66,6 +35,8 @@ class GlbMerger:
         output_dir: str,
         output_filename: Optional[str] = None,
     ):
+        # 与 splitter/dedup 保持一致：Node 传来的就是短路径 ADMINI~1，
+        # 全流程统一用短路径，避免写短读长的不一致
         self.input_dir = os.path.abspath(input_dir)
         self.output_dir = os.path.abspath(output_dir)
         self.raw_output_filename = (output_filename or "").strip() or None
@@ -73,18 +44,15 @@ class GlbMerger:
         self.tree_json_path: Optional[str] = None
         self.output_filename_base: str = DEFAULT_OUTPUT_FILENAME
 
-        # 主 glTF 元数据累积数组（纯 JSON，尺寸小）
         self.nodes: List[Dict[str, Any]] = []
         self.meshes: List[Dict[str, Any]] = []
         self.accessors: List[Dict[str, Any]] = []
         self.buffer_views: List[Dict[str, Any]] = []
 
-        # BIN 累积：写到临时文件，避免内存堆积
         self.temp_bin_path: Optional[str] = None
         self.temp_bin_file = None
         self.bin_length = 0
 
-        # 同一零件被多个实例引用时只合并一次
         self.mesh_cache: Dict[str, int] = {}
 
     # -----------------------------------------------------------------
@@ -124,12 +92,6 @@ class GlbMerger:
     # -----------------------------------------------------------------
 
     def _stream_sub_glb(self, glb_abs: str) -> Tuple[Dict[str, Any], int]:
-        """
-        流式读取子 GLB：
-          - JSON chunk 读入内存（尺寸小）
-          - BIN chunk 逐块 copy 到临时 BIN 文件（不进内存）
-        返回 (sub_json, bin_start_offset)
-        """
         bin_start = self.bin_length
 
         with open(glb_abs, "rb") as f:
@@ -145,7 +107,6 @@ class GlbMerger:
 
             json_chunk: Optional[Dict[str, Any]] = None
 
-            # 逐 chunk 处理
             while True:
                 chunk_hdr = f.read(8)
                 if len(chunk_hdr) < 8:
@@ -154,10 +115,8 @@ class GlbMerger:
                 chunk_len, chunk_type = struct.unpack("<I4s", chunk_hdr)
 
                 if chunk_type == b"JSON":
-                    # JSON chunk 读进内存
                     json_chunk = json.loads(f.read(chunk_len).decode("utf-8"))
                 elif chunk_type == b"BIN\x00":
-                    # BIN chunk 流式 copy 到临时文件
                     remaining = chunk_len
                     while remaining > 0:
                         buf = f.read(min(COPY_CHUNK_SIZE, remaining))
@@ -167,13 +126,11 @@ class GlbMerger:
                         remaining -= len(buf)
                     self.bin_length += chunk_len
                 else:
-                    # 未知 chunk，跳过
                     f.seek(chunk_len, 1)
 
             if json_chunk is None:
                 raise ValueError(f"GLB 里没有 JSON chunk: {glb_abs}")
 
-        # BIN 结尾 4 字节对齐
         pad = (-self.bin_length) % 4
         if pad:
             self.temp_bin_file.write(b"\x00" * pad)
@@ -186,35 +143,28 @@ class GlbMerger:
     # -----------------------------------------------------------------
 
     def _merge_sub_glb(self, glb_rel_path: str) -> int:
-        """把子 GLB 的 mesh 元数据合并到主 glTF，BIN 已由 _stream_sub_glb 落盘"""
         if glb_rel_path in self.mesh_cache:
             return self.mesh_cache[glb_rel_path]
 
-        glb_abs = os.path.join(self.input_dir, glb_rel_path)
-        if not os.path.isfile(glb_abs):
-            raise FileNotFoundError(f"子 GLB 不存在: {glb_abs}")
-
+        glb_abs = os.path.normpath(os.path.join(self.input_dir, glb_rel_path))
         sub_json, bin_start = self._stream_sub_glb(glb_abs)
 
         bv_offset = len(self.buffer_views)
         acc_offset = len(self.accessors)
         mesh_offset = len(self.meshes)
 
-        # ---------- bufferViews：offset 加上该子 GLB BIN 在总 BIN 里的起始位置 ----------
         for bv in sub_json.get("bufferViews", []):
             new_bv = dict(bv)
             new_bv["buffer"] = 0
             new_bv["byteOffset"] = bv.get("byteOffset", 0) + bin_start
             self.buffer_views.append(new_bv)
 
-        # ---------- accessors：bufferView 索引加偏移 ----------
         for acc in sub_json.get("accessors", []):
             new_acc = dict(acc)
             if "bufferView" in new_acc:
                 new_acc["bufferView"] += bv_offset
             self.accessors.append(new_acc)
 
-        # ---------- meshes：attributes / indices 的 accessor 索引加偏移 ----------
         for mesh in sub_json.get("meshes", []):
             new_mesh: Dict[str, Any] = {"primitives": []}
             for prim in mesh.get("primitives", []):
@@ -263,7 +213,7 @@ class GlbMerger:
                 try:
                     node["mesh"] = self._merge_sub_glb(asset)
                 except Exception as e:
-                    logger_err(f"[merge] 加载子 GLB 失败: {asset}: {e}")
+                    logger_err(f"加载子 GLB 失败: {asset}: {e}")
 
         children = tree_node.get("children") or []
         if children:
@@ -272,7 +222,7 @@ class GlbMerger:
         return my_index
 
     # -----------------------------------------------------------------
-    # 写出 GLB（从临时 BIN 流式 copy）
+    # 写出 GLB
     # -----------------------------------------------------------------
 
     def _write_glb(self, root_indices: List[int], out_path: str) -> None:
@@ -301,7 +251,6 @@ class GlbMerger:
 
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
-        # 刷新临时 BIN 文件并流式 copy 到目标
         self.temp_bin_file.flush()
         self.temp_bin_file.seek(0)
 
@@ -345,7 +294,6 @@ class GlbMerger:
 
         os.makedirs(self.output_dir, exist_ok=True)
 
-        # 打开临时 BIN 文件（delete=False，让 Windows 也能后续读）
         fd, self.temp_bin_path = tempfile.mkstemp(
             prefix=".merge-bin-", suffix=".tmp", dir=self.output_dir
         )
@@ -383,7 +331,6 @@ class GlbMerger:
             return output_path
 
         finally:
-            # 清理临时文件
             try:
                 if self.temp_bin_file is not None:
                     self.temp_bin_file.close()
