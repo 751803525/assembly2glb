@@ -12,7 +12,7 @@ jobs:
 
     permissions:
       contents: read
-      id-token: write   # 必须：允许获取 OIDC token
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
@@ -23,34 +23,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-          # 千万不要写 registry-url
-          # 否则 setup-node 会往 .npmrc 写空 _authToken，顶掉 OIDC
 
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm run build
 
-      - name: Update npm
-        run: npm install -g npm@latest
-
-      - name: Debug OIDC
-        run: |
-          echo "OIDC URL: ${ACTIONS_ID_TOKEN_REQUEST_URL:+set}"
-          echo "OIDC TOKEN: ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+set}"
-          echo "NODE_AUTH_TOKEN is $([ -z "${NODE_AUTH_TOKEN+x}" ] && echo 'undefined (good)' || echo 'still defined (bad)')"
-          npm --version
-          npm config list
-
-      - name: Clean .npmrc to allow OIDC
-        run: |
-          echo "--- Before cleaning ---"
-          cat "$NPM_CONFIG_USERCONFIG" || true
-          # 删除 setup-node 注入的空 _authToken 行
-          sed -i '/_authToken/d' "$NPM_CONFIG_USERCONFIG" || true
-          echo "--- After cleaning ---"
-          cat "$NPM_CONFIG_USERCONFIG" || true
-
-      - name: Publish
-        run: |
-          unset NODE_AUTH_TOKEN
-          npm publish --access public --provenance
+      - name: Publish to npm
+        run: npm publish --access public --provenance
