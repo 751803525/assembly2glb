@@ -12,7 +12,7 @@ jobs:
 
     permissions:
       contents: read
-      id-token: write   # 关键：允许获取 OIDC token
+      id-token: write   # 必须：允许获取 OIDC token
 
     steps:
       - uses: actions/checkout@v4
@@ -31,5 +31,21 @@ jobs:
       - name: Update npm
         run: npm install -g npm@latest
 
+      - name: Debug OIDC
+        run: |
+          echo "OIDC URL: ${ACTIONS_ID_TOKEN_REQUEST_URL:+set}"
+          echo "OIDC TOKEN: ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+set}"
+          echo "NODE_AUTH_TOKEN is $([ -z "${NODE_AUTH_TOKEN+x}" ] && echo 'undefined (good)' || echo 'still defined (bad)')"
+          npm --version
+          npm config list
+
+      - name: Strip empty authToken from .npmrc
+        run: |
+          if [ -f "$NPM_CONFIG_USERCONFIG" ]; then
+            sed -i '/_authToken/d' "$NPM_CONFIG_USERCONFIG"
+          fi
+
       - name: Publish
-        run: npm publish --access public --provenance
+        run: |
+          unset NODE_AUTH_TOKEN
+          npm publish --access public --provenance
