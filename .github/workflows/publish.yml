@@ -12,13 +12,17 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write   # 用于打 git tag
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # 打 tag 需要完整历史
 
       - name: 安装 pnpm
         uses: pnpm/action-setup@v4
+        with:
+          version: 9
 
       - uses: actions/setup-node@v4
         with:
@@ -29,20 +33,39 @@ jobs:
       - name: 升级 npm
         run: npm install -g npm@latest
 
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 代码检查
+        run: pnpm run lint
+
+      - name: 构建
+        run: pnpm run build
 
       - name: 预览将要发布的包
         run: npm pack --dry-run
 
+      - name: 检查 NPM_TOKEN
+        if: ${{ !inputs.dry_run }}
+        run: |
+          if [ -z "${{ secrets.NPM_TOKEN }}" ]; then
+            echo "::error::Missing NPM_TOKEN secret"
+            exit 1
+          fi
+
       - name: 发布到 npm（dry-run）
         if: ${{ inputs.dry_run }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --dry-run
+        run: npm publish --access public --ignore-scripts --dry-run
 
       - name: 发布到 npm（真实发布）
         if: ${{ !inputs.dry_run }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
+        run: npm publish --access public --ignore-scripts
+
+      - name: 打 git tag
+        if: ${{ !inputs.dry_run }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          git tag "v$VERSION"
+          git push origin "v$VERSION"

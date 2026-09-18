@@ -1,21 +1,21 @@
 {
-  "name": "@chanleeeee/cadlite",
+  "name": "@chanleeeee/assembly2glb",
   "version": "0.1.3",
-  "description": "Industrial CAD to Web 3D lightweight pipeline",
+  "description": "Convert industrial STEP assemblies to glTF/GLB for web 3D — split, dedup, simplify, and merge large CAD models",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "cadlite": "dist/index.js"
+    "assembly2glb": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc && tsc-alias && cpy \"src/**/*.py\" dist --parents",
     "clean": "rimraf dist",
-    "prebuild": "npm run clean && npm run build",
+    "build": "npm run clean && tsc && tsc-alias && cpy \"src/**/*.py\" dist --parents",
+    "rebuild": "npm run build",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "lint": "eslint src/**/*.ts",
     "format": "prettier --write src/**/*.ts",
-    "prepublishOnly": "npm run prebuild"
+    "prepublishOnly": "npm run rebuild"
   },
   "files": [
     "dist"
@@ -23,11 +23,27 @@
   "keywords": [
     "cad",
     "step",
+    "stp",
     "3d",
     "glb",
     "gltf",
-    "optimization"
+    "assembly",
+    "opencascade",
+    "occ",
+    "pythonocc",
+    "mesh",
+    "optimization",
+    "converter",
+    "industrial"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chanleeeee/cadlite.git"
+  },
+  "homepage": "https://github.com/chanleeeee/cadlite#readme",
+  "bugs": {
+    "url": "https://github.com/chanleeeee/cadlite/issues"
+  },
   "packageManager": "pnpm@9.15.0",
   "tsc-alias": {
     "resolveFullPaths": true,
