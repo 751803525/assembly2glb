@@ -46,13 +46,13 @@
 ### 安装 assembly2glb
 
 ```bash
-npm install -g assembly2glb
+npm install -g @chanleeeee/assembly2glb
 ```
 
 或者用 pnpm：
 
 ```bash
-pnpm add -g assembly2glb
+pnpm add -g @chanleeeee/assembly2glb
 ```
 
 ### 首次运行
