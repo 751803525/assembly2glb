@@ -1,6 +1,20 @@
 """
 装配体 GLB 合并脚本（独立工具，流式合并版）
-...（其余文档字符串不变）
+
+把 cad-splitter 输出的多个零件 glTF + BIN 按结构树合并成一个装配 GLB
+（流式：BIN 数据直接搬运，不整体进内存）
+
+输入：一个目录，包含
+    - 一个结构树 *.json（cad-splitter 的输出）
+    - meshs/ 子目录，里面是每个零件的 xxx__hash.gltf + 同名 .bin
+
+输出：合并后的单个 .glb
+
+兼容字段：
+    - type: "mesh" / "part"       → 有几何
+    - type: "node" / "assembly"   → 纯装配
+    - assets / asset              → 关联的子 glTF 路径
+    - transform.scale             → 单值 float 或 [x,y,z] 数组
 """
 
 import os
@@ -8,6 +22,7 @@ import sys
 import re
 import json
 import glob
+import base64
 import struct
 import shutil
 import tempfile
@@ -26,8 +41,27 @@ DEFAULT_OUTPUT_FILENAME = "assembly"
 COPY_CHUNK_SIZE = 4 * 1024 * 1024
 
 
-class GlbMerger:
-    """把多个零件 GLB 按结构树合并成一个装配 GLB（流式，低内存）"""
+def _norm_scale(v, default=None) -> List[float]:
+    """
+    把单值 / 数组 / None 统一成 3 元 float 数组。
+    cad-splitter 旧版输出 [s, s, s]，新版输出 s（单值 float）。
+    """
+    if default is None:
+        default = [1.0, 1.0, 1.0]
+    if v is None:
+        return list(default)
+    if isinstance(v, (int, float)):
+        return [float(v)] * 3
+    if isinstance(v, (list, tuple)):
+        if len(v) == 3:
+            return [float(x) for x in v]
+        if len(v) == 1:
+            return [float(v[0])] * 3
+    return list(default)
+
+
+class GltfMerger:
+    """把多个零件 glTF（+ 外置 .bin）按结构树合并成一个装配 GLB（流式，低内存）"""
 
     def __init__(
         self,
@@ -35,8 +69,6 @@ class GlbMerger:
         output_dir: str,
         output_filename: Optional[str] = None,
     ):
-        # 与 splitter/dedup 保持一致：Node 传来的就是短路径 ADMINI~1，
-        # 全流程统一用短路径，避免写短读长的不一致
         self.input_dir = os.path.abspath(input_dir)
         self.output_dir = os.path.abspath(output_dir)
         self.raw_output_filename = (output_filename or "").strip() or None
@@ -48,11 +80,13 @@ class GlbMerger:
         self.meshes: List[Dict[str, Any]] = []
         self.accessors: List[Dict[str, Any]] = []
         self.buffer_views: List[Dict[str, Any]] = []
+        self.materials: List[Dict[str, Any]] = []
 
         self.temp_bin_path: Optional[str] = None
         self.temp_bin_file = None
         self.bin_length = 0
 
+        # 缓存：相对路径 → 合并后的 mesh 索引
         self.mesh_cache: Dict[str, int] = {}
 
     # -----------------------------------------------------------------
@@ -85,103 +119,132 @@ class GlbMerger:
 
     @staticmethod
     def _strip_glb_ext(name: str) -> str:
-        return name[:-4] if name.lower().endswith(".glb") else name
+        lower = name.lower()
+        for ext in (".glb", ".gltf"):
+            if lower.endswith(ext):
+                return name[: -len(ext)]
+        return name
 
     # -----------------------------------------------------------------
-    # 流式读取子 GLB
+    # 流式读取子 glTF + BIN
     # -----------------------------------------------------------------
 
-    def _stream_sub_glb(self, glb_abs: str) -> Tuple[Dict[str, Any], int]:
-        bin_start = self.bin_length
+    def _stream_sub_gltf(self, gltf_abs: str) -> Tuple[Dict[str, Any], List[int]]:
+        """
+        读取子 .gltf，把它的所有 buffer 内容按顺序追加到临时 bin 文件，
+        返回 (gltf_json, buffer_starts)。
 
-        with open(glb_abs, "rb") as f:
-            header = f.read(12)
-            if len(header) < 12:
-                raise ValueError(f"GLB 文件过短: {glb_abs}")
+        buffer_starts[k] = 子 gltf 第 k 个 buffer 在全局 bin 中的起始字节偏移。
+        """
+        with open(gltf_abs, "r", encoding="utf-8") as f:
+            sub_json = json.load(f)
 
-            magic, version, length = struct.unpack("<4sII", header)
-            if magic != b"glTF":
-                raise ValueError(f"不是 GLB 文件: {glb_abs}")
-            if version != 2:
-                raise ValueError(f"不支持的 GLB 版本: {version}")
+        gltf_dir = os.path.dirname(gltf_abs)
+        buffers = sub_json.get("buffers", [])
+        buffer_starts: List[int] = []
 
-            json_chunk: Optional[Dict[str, Any]] = None
+        for buf in buffers:
+            start = self.bin_length
+            buffer_starts.append(start)
 
-            while True:
-                chunk_hdr = f.read(8)
-                if len(chunk_hdr) < 8:
-                    break
+            uri = buf.get("uri", "") or ""
 
-                chunk_len, chunk_type = struct.unpack("<I4s", chunk_hdr)
-
-                if chunk_type == b"JSON":
-                    json_chunk = json.loads(f.read(chunk_len).decode("utf-8"))
-                elif chunk_type == b"BIN\x00":
-                    remaining = chunk_len
-                    while remaining > 0:
-                        buf = f.read(min(COPY_CHUNK_SIZE, remaining))
-                        if not buf:
+            if uri.startswith("data:"):
+                # data:application/octet-stream;base64,xxxx
+                _, _, b64 = uri.partition(",")
+                raw = base64.b64decode(b64)
+                self.temp_bin_file.write(raw)
+                self.bin_length += len(raw)
+            elif uri:
+                # 外部 .bin（相对 gltf 所在目录）
+                bin_abs = os.path.normpath(os.path.join(gltf_dir, uri))
+                if not os.path.isfile(bin_abs):
+                    raise FileNotFoundError(f"找不到 bin 文件: {bin_abs}")
+                with open(bin_abs, "rb") as fb:
+                    while True:
+                        chunk = fb.read(COPY_CHUNK_SIZE)
+                        if not chunk:
                             break
-                        self.temp_bin_file.write(buf)
-                        remaining -= len(buf)
-                    self.bin_length += chunk_len
-                else:
-                    f.seek(chunk_len, 1)
+                        self.temp_bin_file.write(chunk)
+                        self.bin_length += len(chunk)
+            else:
+                # 无 uri：GLB 内嵌 buffer 的情况，理论上不会出现在 .gltf 里
+                # 但有 buffer 声明却无数据时，按 byteLength 补零
+                declared = int(buf.get("byteLength", 0))
+                if declared > 0:
+                    self.temp_bin_file.write(b"\x00" * declared)
+                    self.bin_length += declared
 
-            if json_chunk is None:
-                raise ValueError(f"GLB 里没有 JSON chunk: {glb_abs}")
+            # 每个 buffer 之间做 4 字节对齐
+            pad = (-self.bin_length) % 4
+            if pad:
+                self.temp_bin_file.write(b"\x00" * pad)
+                self.bin_length += pad
 
-        pad = (-self.bin_length) % 4
-        if pad:
-            self.temp_bin_file.write(b"\x00" * pad)
-            self.bin_length += pad
-
-        return json_chunk, bin_start
+        return sub_json, buffer_starts
 
     # -----------------------------------------------------------------
-    # 合并单个子 GLB
+    # 合并单个子 glTF
     # -----------------------------------------------------------------
 
-    def _merge_sub_glb(self, glb_rel_path: str) -> int:
-        if glb_rel_path in self.mesh_cache:
-            return self.mesh_cache[glb_rel_path]
+    def _merge_sub_gltf(self, gltf_rel_path: str) -> int:
+        if gltf_rel_path in self.mesh_cache:
+            return self.mesh_cache[gltf_rel_path]
 
-        glb_abs = os.path.normpath(os.path.join(self.input_dir, glb_rel_path))
-        sub_json, bin_start = self._stream_sub_glb(glb_abs)
+        # 兼容绝对路径 / 相对路径
+        if os.path.isabs(gltf_rel_path):
+            gltf_abs = gltf_rel_path
+        else:
+            gltf_abs = os.path.normpath(os.path.join(self.input_dir, gltf_rel_path))
+
+        sub_json, buffer_starts = self._stream_sub_gltf(gltf_abs)
 
         bv_offset = len(self.buffer_views)
         acc_offset = len(self.accessors)
         mesh_offset = len(self.meshes)
+        mat_offset = len(self.materials)
 
+        # ---- bufferViews：buffer 全部改为 0，byteOffset 加上对应 buffer 起始 ----
         for bv in sub_json.get("bufferViews", []):
             new_bv = dict(bv)
+            buf_idx = int(bv.get("buffer", 0))
+            base = buffer_starts[buf_idx] if 0 <= buf_idx < len(buffer_starts) else 0
             new_bv["buffer"] = 0
-            new_bv["byteOffset"] = bv.get("byteOffset", 0) + bin_start
+            new_bv["byteOffset"] = int(bv.get("byteOffset", 0)) + base
             self.buffer_views.append(new_bv)
 
+        # ---- accessors：bufferView 索引整体偏移 ----
         for acc in sub_json.get("accessors", []):
             new_acc = dict(acc)
             if "bufferView" in new_acc:
-                new_acc["bufferView"] += bv_offset
+                new_acc["bufferView"] = int(new_acc["bufferView"]) + bv_offset
             self.accessors.append(new_acc)
 
+        # ---- materials：追加到全局材质表 ----
+        for mat in sub_json.get("materials", []):
+            self.materials.append(dict(mat))
+
+        # ---- meshes：attributes / indices / material 索引整体偏移 ----
         for mesh in sub_json.get("meshes", []):
             new_mesh: Dict[str, Any] = {"primitives": []}
             for prim in mesh.get("primitives", []):
                 new_prim: Dict[str, Any] = {"attributes": {}}
                 for attr_name, acc_idx in prim.get("attributes", {}).items():
-                    new_prim["attributes"][attr_name] = acc_idx + acc_offset
+                    new_prim["attributes"][attr_name] = int(acc_idx) + acc_offset
                 if "indices" in prim:
-                    new_prim["indices"] = prim["indices"] + acc_offset
+                    new_prim["indices"] = int(prim["indices"]) + acc_offset
                 if "material" in prim:
-                    new_prim["material"] = prim["material"]
+                    new_prim["material"] = int(prim["material"]) + mat_offset
                 if "mode" in prim:
-                    new_prim["mode"] = prim["mode"]
+                    new_prim["mode"] = int(prim["mode"])
                 new_mesh["primitives"].append(new_prim)
+            # 保留可能存在的 name
+            if "name" in mesh:
+                new_mesh["name"] = mesh["name"]
             self.meshes.append(new_mesh)
 
         merged_index = mesh_offset
-        self.mesh_cache[glb_rel_path] = merged_index
+        self.mesh_cache[gltf_rel_path] = merged_index
         return merged_index
 
     # -----------------------------------------------------------------
@@ -195,25 +258,29 @@ class GlbMerger:
         trsf = tree_node.get("transform") or {}
         pos = trsf.get("position") or [0.0, 0.0, 0.0]
         quat = trsf.get("quaternion") or [0.0, 0.0, 0.0, 1.0]
-        scale = trsf.get("scale") or [1.0, 1.0, 1.0]
+        scale_raw = trsf.get("scale")
 
         if pos != [0.0, 0.0, 0.0]:
             node["translation"] = [float(v) for v in pos]
         if quat != [0.0, 0.0, 0.0, 1.0]:
             node["rotation"] = [float(v) for v in quat]
-        if scale != [1.0, 1.0, 1.0]:
-            node["scale"] = [float(v) for v in scale]
+
+        # scale 可能是单值 float（新格式）或数组（旧格式）
+        scale3 = _norm_scale(scale_raw, [1.0, 1.0, 1.0])
+        if scale3 != [1.0, 1.0, 1.0]:
+            node["scale"] = scale3
 
         my_index = len(self.nodes)
         self.nodes.append(node)
 
-        if tree_node.get("type") == "part":
-            asset = tree_node.get("asset")
+        node_type = tree_node.get("type", "")
+        if node_type in ("mesh", "part"):
+            asset = tree_node.get("assets") or tree_node.get("asset")
             if asset:
                 try:
-                    node["mesh"] = self._merge_sub_glb(asset)
+                    node["mesh"] = self._merge_sub_gltf(asset)
                 except Exception as e:
-                    logger_err(f"加载子 GLB 失败: {asset}: {e}")
+                    logger_err(f"加载子 glTF 失败: {asset}: {e}")
 
         children = tree_node.get("children") or []
         if children:
@@ -229,7 +296,7 @@ class GlbMerger:
         gltf: Dict[str, Any] = {
             "asset": {
                 "version": "2.0",
-                "generator": "assembly2glb Assembled GLB Merger (stream)",
+                "generator": "assembly2glb Assembled GLB Merger (gltf+bin stream)",
             },
             "scene": 0,
             "scenes": [{"nodes": root_indices}],
@@ -239,6 +306,8 @@ class GlbMerger:
             "bufferViews": self.buffer_views,
             "buffers": [{"byteLength": self.bin_length}],
         }
+        if self.materials:
+            gltf["materials"] = self.materials
 
         json_bytes = json.dumps(gltf, separators=(",", ":")).encode("utf-8")
         while len(json_bytes) % 4 != 0:
@@ -315,6 +384,7 @@ class GlbMerger:
                 f"合并统计: nodes={len(self.nodes)} meshes={len(self.meshes)} "
                 f"accessors={len(self.accessors)} "
                 f"bufferViews={len(self.buffer_views)} "
+                f"materials={len(self.materials)} "
                 f"bin={self.bin_length / 1024 / 1024:.2f} MB"
             )
 
@@ -341,9 +411,9 @@ class GlbMerger:
 
 def main():
     if len(sys.argv) < 3:
-        print("用法: python merge-glb.py <输入目录> <输出目录> [输出文件名]")
+        print("用法: python merge-gltf.py <输入目录> <输出目录> [输出文件名]")
         print("说明:")
-        print("  <输入目录>   含 *.json 结构树 + glbs/ 子目录")
+        print("  <输入目录>   含 *.json 结构树 + meshs/ 子目录（*.gltf + *.bin）")
         print("  <输出目录>   合并结果输出目录")
         print("  [输出文件名] 可选，如 'demo' 或 'demo.glb'")
         print("               不传时依次回退到 JSON 顶级 name → 'assembly'")
@@ -354,9 +424,9 @@ def main():
     output_filename = sys.argv[3] if len(sys.argv) >= 4 else None
 
     try:
-        GlbMerger(input_dir, output_dir, output_filename).run()
+        GltfMerger(input_dir, output_dir, output_filename).run()
     except Exception as e:
-        logger_err(f"[merge-glb] 合并失败: {e}")
+        logger_err(f"[merge-gltf] 合并失败: {e}")
         sys.exit(1)
 
 

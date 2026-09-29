@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 
 const formateTag = (tag: string) => {
-  return `[${tag} - ${new Date().toISOString()}]`;
+  return `[${new Date().toISOString()}] [${tag}]`;
 };
 export const logger = {
   debug: (tag: string, message?: any, ...optionalParams: any[]) => {

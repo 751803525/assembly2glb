@@ -260,7 +260,7 @@ conda config --set channel_priority strict
 ### Q4. 输出的 GLB 比 FreeCAD 导出的大/小
 
 - FreeCAD 默认 deflection 更小（约 0.05），三角形数量更多，文件更大
-- assembly2glb 默认 `0.2`，用 `-p 0.05` 可对齐
+- assembly2glb 默认 `0.1`，用 `-p 0.05` 可对齐
 - 会做几何实例复用，文件通常比 FreeCAD 更小
 
 ### Q5. 一个零件都没导出 / 全叫 `Node`

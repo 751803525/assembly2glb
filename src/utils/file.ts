@@ -51,7 +51,7 @@ export const fileUtils = {
         await fs.emptyDir(p);
       }
     } else {
-      fileUtils.ensureDir(path.dirname(p));
+      await fileUtils.ensureDir(path.dirname(p));
     }
   },
   writeFile: async function (filePath: string, data: any, space: number = 2): Promise<void> {
@@ -78,11 +78,15 @@ export const fileUtils = {
     if (!(await fs.stat(dir)).isDirectory()) {
       return [] as string[];
     }
-    const result = await fs.readdir(dir, { encoding: 'utf-8' });
+    let result = await fs.readdir(dir, { encoding: 'utf-8' });
     if (suffix) {
-      result.filter((name) => {
+      const normalized = suffix.startsWith('.')
+        ? suffix.toLocaleLowerCase()
+        : '.' + suffix.toLocaleLowerCase();
+
+      result = result.filter((name) => {
         const ext = path.extname(name).toLocaleLowerCase();
-        return ext == suffix.toLocaleLowerCase();
+        return ext === normalized;
       });
     }
     return result.map((name) => path.join(dir, name));

@@ -8,14 +8,16 @@ const TAG = 'merge';
  * 费分析去重复
  */
 export async function merge(
-  config: PipelineConfig,
-  pythonPath: string,
-  fileName?: string
+  config: PipelineConfig & {
+    env: string;
+    fileName?: string;
+  }
 ): Promise<string> {
-  const { inputPath, outputDir } = config;
+  const { inputPath, outputDir, env, fileName } = config;
   await fileUtils.emptyDir(outputDir);
   // 2  合并glb
-  await spawn(pythonPath, [merge_glb, inputPath, outputDir, fileName], {}, TAG);
+  console.log('fileName', fileName);
+  await spawn(env, [merge_glb, inputPath, outputDir, fileName], {}, TAG);
   if (config.mode == 'all') {
     fileUtils.copy(inputPath, outputDir);
   }

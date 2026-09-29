@@ -6,6 +6,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const cad_splitter = path.resolve(__dirname, './cad-splitter.py');
+export const glb_splitter = path.resolve(__dirname, './glb-splitter.py');
 export const merge_glb = path.resolve(__dirname, './merge-glb.py');
 export const dedup = path.join(__dirname, 'dedup.py');
 export const verify_occ = path.join(__dirname, 'verify-occ.py');
