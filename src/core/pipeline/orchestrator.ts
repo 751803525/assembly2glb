@@ -1,5 +1,5 @@
 import { logger } from '@/utils/logger.js';
-import { fileUtils } from '@/utils/file.js';
+import { fileUtils } from '@/utils/file-utils.js';
 import { tempDir } from '@/utils/temp-path.js';
 import path from 'path';
 import { checkLocalEnvironment } from '@/core/steps/env-check.js';
@@ -75,7 +75,7 @@ export async function runPipeline(
     });
   }
   logger.info(TAG, '开始写入，准备写入到输出目录');
-  await fileUtils.emptyDir(outputDir);
+  await fileUtils.prepareEmptyDir(outputDir);
   await fileUtils.copy(cacheDir, outputDir);
   if (!config.keepTemp) {
     await fileUtils.remove(cacheDir);

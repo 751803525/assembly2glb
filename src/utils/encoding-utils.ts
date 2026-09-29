@@ -2,7 +2,7 @@ import fs from 'fs-extra';
 import chardet from 'chardet';
 import iconv from 'iconv-lite';
 import { pipeline } from 'node:stream/promises';
-import { fileUtils } from '@/utils/file.js';
+import { fileUtils } from '@/utils/file-utils.js';
 
 // 定义你的典型目标编码（归一化白名单）
 type TARGET_ENCODINGS = 'UTF-8' | 'GBK' | 'ASCII' | 'ISO-8859-1';
@@ -108,7 +108,7 @@ export async function convertFileEncodingStream(
   if (!iconv.encodingExists(toEncoding)) {
     throw new Error(`不支持的目标编码类型: ${toEncoding}`);
   }
-  await fileUtils.emptyDir(toPath);
+  await fileUtils.prepareForFile(toPath);
   // 4. 创建可读流与可写流
   const readStream = fs.createReadStream(fromPath);
   const writeStream = fs.createWriteStream(toPath);
@@ -128,7 +128,7 @@ export async function fileEncoding(
   targetEncoding: string,
   options: { limitBytes?: number; defaultEncoding?: TARGET_ENCODINGS } = {}
 ): Promise<string> {
-  fileUtils.emptyDir(outputPath);
+  fileUtils.prepareForFile(outputPath);
   const { limitBytes = 1024 * 1024, defaultEncoding = 'GBK' } = options;
   if (!fs.existsSync(inputPath)) throw new Error(`输入文件不存在: ${inputPath}`);
   const encoding = await detectNonAsciiEncoding(inputPath, limitBytes, defaultEncoding);

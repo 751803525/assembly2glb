@@ -4,7 +4,7 @@ import { convertFileEncodingStream, detectNonAsciiEncoding } from '@/utils/encod
 import { PipelineConfig } from './types.js';
 import { cad_splitter, glb_splitter } from '@/scripts/index.js';
 import { spawn } from '@/utils/child-process-utils.js';
-import { fileUtils } from '@/utils/file.js';
+import { fileUtils } from '@/utils/file-utils.js';
 
 const TAG = 'convert';
 
@@ -19,7 +19,7 @@ export async function convert(config: PipelineConfig & { env: string }): Promise
   const { inputPath, outputDir, precision, env } = config;
   const ext = path.extname(inputPath).toLocaleLowerCase();
 
-  await fileUtils.emptyDir(outputDir);
+  await fileUtils.prepareEmptyDir(outputDir);
 
   // 1. 选择 splitter
   let splitter: string;
@@ -53,7 +53,7 @@ export async function convert(config: PipelineConfig & { env: string }): Promise
   // 3. 抽取结构树与零件网格
   logger.info(TAG, `抽取结构树（${path.basename(splitter)}）`);
   const splitDir = path.join(outputDir, 'convert-split-part');
-  await fileUtils.emptyDir(splitDir);
+  await fileUtils.prepareEmptyDir(splitDir);
 
   await spawn(
     env,

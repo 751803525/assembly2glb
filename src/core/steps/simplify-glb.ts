@@ -5,7 +5,7 @@ import { MeshoptSimplifier, MeshoptDecoder } from 'meshoptimizer';
 
 import { logger } from '@/utils/logger.js';
 import { PipelineConfig } from './types.js';
-import { fileUtils } from '@/utils/file.js';
+import { fileUtils } from '@/utils/file-utils.js';
 
 const TAG = 'simplify';
 
@@ -89,7 +89,7 @@ export async function simplifyGlb(
 
   const meshsIn = path.join(inputPath, 'meshs');
   const meshsOut = path.join(outputDir, 'meshs');
-  await fileUtils.emptyDir(meshsOut);
+  await fileUtils.prepareEmptyDir(meshsOut);
 
   const gltfFiles = await fileUtils.readdir(meshsIn, 'gltf');
 

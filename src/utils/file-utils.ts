@@ -42,17 +42,33 @@ export const fileUtils = {
     }
     return to;
   },
-  emptyDir: async function (p: string) {
-    if (await fileUtils.exists(p)) {
-      const stat = await fs.stat(p);
-      if (stat.isFile()) {
-        await fs.remove(p);
-      } else {
-        await fs.emptyDir(p);
+  /**
+   * 准备一个空目录：保证 dirPath 存在且为空。
+   * 用于"接下来要往这个目录里写一批文件"的场景，
+   * 特别是 tempDir 里反复运行、需要丢掉上次残留的情况。
+   */
+  prepareEmptyDir: async function (dirPath: string): Promise<void> {
+    if (await fs.pathExists(dirPath)) {
+      const stat = await fs.stat(dirPath);
+      if (stat.isDirectory()) {
+        await fs.emptyDir(dirPath);
+        return;
       }
-    } else {
-      await fileUtils.ensureDir(path.dirname(p));
+      // 是文件：删掉，再建同名目录
+      await fs.remove(dirPath);
     }
+    await fs.ensureDir(dirPath);
+  },
+
+  /**
+   * 准备写一个文件：保证 filePath 的父目录存在，并清掉 filePath 上
+   *
+   * 注意：不清空父目录，因此同级其他文件不受影响。
+   * 用于"接下来要写 filePath"这类单文件场景。
+   */
+  prepareForFile: async function (filePath: string): Promise<void> {
+    await fs.ensureDir(path.dirname(filePath));
+    await fs.remove(filePath);
   },
   writeFile: async function (filePath: string, data: any, space: number = 2): Promise<void> {
     // 1. 确保目录存在

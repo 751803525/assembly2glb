@@ -1,5 +1,5 @@
 import { PipelineConfig } from './types.js';
-import { fileUtils } from '@/utils/file.js';
+import { fileUtils } from '@/utils/file-utils.js';
 import { spawn } from '@/utils/child-process-utils.js';
 import { dedup } from '@/scripts/index.js';
 const TAG = 'dedup';
@@ -8,7 +8,7 @@ const TAG = 'dedup';
  */
 export async function dedupGlb(config: PipelineConfig & { env: string }): Promise<string> {
   const { inputPath, outputDir, env } = config;
-  await fileUtils.emptyDir(outputDir);
+  await fileUtils.prepareEmptyDir(outputDir);
   // 2  合并glb
   await spawn(env, [dedup, inputPath, outputDir], {}, TAG);
   return config.outputDir;

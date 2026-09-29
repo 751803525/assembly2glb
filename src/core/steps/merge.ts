@@ -1,5 +1,5 @@
 import { PipelineConfig } from './types.js';
-import { fileUtils } from '@/utils/file.js';
+import { fileUtils } from '@/utils/file-utils.js';
 import { spawn } from '@/utils/child-process-utils.js';
 import { merge_glb } from '@/scripts/index.js';
 
@@ -14,7 +14,7 @@ export async function merge(
   }
 ): Promise<string> {
   const { inputPath, outputDir, env, fileName } = config;
-  await fileUtils.emptyDir(outputDir);
+  await fileUtils.prepareEmptyDir(outputDir);
   // 2  合并glb
   console.log('fileName', fileName);
   await spawn(env, [merge_glb, inputPath, outputDir, fileName], {}, TAG);
