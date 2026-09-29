@@ -16,7 +16,6 @@ export async function merge(
   const { inputPath, outputDir, env, fileName } = config;
   await fileUtils.prepareEmptyDir(outputDir);
   // 2  合并glb
-  console.log('fileName', fileName);
   await spawn(env, [merge_glb, inputPath, outputDir, fileName], {}, TAG);
   if (config.mode == 'all') {
     fileUtils.copy(inputPath, outputDir);
