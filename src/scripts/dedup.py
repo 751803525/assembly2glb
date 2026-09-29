@@ -2,10 +2,10 @@
 装配体零件 glTF + BIN 去重脚本（独立工具）
 
 用途：
-    cad-splitter.py 会为每个 label 导出一份 glTF（+ 同名 .bin）。同一几何在
-    不同 label 上会出现重复导出（例如同型号螺钉被实例化多次）。本脚本对
-    meshs/ 目录下的 glTF + BIN 做多级去重，并同步更新结构树 JSON 里的
-    assets 字段。
+    cad-splitter.py / glb-splitter.py 会为每个 label 导出一份 glTF（+ 同名 .bin）。
+    同一几何在不同 label 上会出现重复导出（例如同型号螺钉被实例化多次）。
+    本脚本对 meshs/ 目录下的 glTF + BIN 做多级去重，并同步更新结构树 JSON 里的
+    asset 字段。
 
     去重分两级：
         一级（内容指纹）：
@@ -14,28 +14,12 @@
         二级（几何指纹）：
             顶点排序 + 索引数，跨 bin 布局差异判定几何是否相同。
 
-    输出目录与输入目录结构完全一致，便于下游 merge-gltf.py 无缝衔接。
+    贴图处理：
+        gltf 里 images[*].uri 引用外部图片文件（tex_xxx.png 等），
+        复制 canonical 时同步把引用的图片一起复制过去，同名去重。
 
 用法：
     python dedup.py <输入目录> <输出目录> [去重等级 1|2]
-
-输入目录结构：
-    <输入目录>/
-        ├─ assembly-tree.json
-        └─ meshs/
-            ├─ xxx__a1b2c3d4.gltf
-            ├─ xxx__a1b2c3d4.bin
-            ├─ yyy__e5f6g7h8.gltf
-            └─ yyy__e5f6g7h8.bin
-
-输出目录结构（与输入一致）：
-    <输出目录>/
-        ├─ assembly-tree.json
-        ├─ dedup-report.json         （预留，暂未写出）
-        └─ meshs/
-
-依赖：
-    仅标准库
 """
 
 import os
@@ -50,11 +34,11 @@ import hashlib
 from typing import Dict, Any, List, Optional, Tuple, Callable
 
 
-def logger_info(msg: str) -> None:
+def log(msg: str) -> None:
     print(msg, flush=True)
 
 
-def logger_err(msg: str) -> None:
+def log_err(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
@@ -65,31 +49,21 @@ REPORT_JSON_NAME = "dedup-report.json"
 GEO_ROUND_DIGITS = 4
 CHUNK_SIZE = 64 * 1024
 
-# 内容指纹里使用的占位符
 URI_PLACEHOLDER = "$BIN"
 GEN_PLACEHOLDER = "$GEN"
 
-# 指纹算法版本前缀，将来改算法可平滑切换
 FINGERPRINT_VERSION = b"V1"
 
 
-# =====================================================================
-# canonical 选择策略
-# =====================================================================
-
-
 def choose_first(files: List[str]) -> str:
-    """保留首现文件（最稳定，可复现）"""
     return files[0]
 
 
 def choose_shortest_name(files: List[str]) -> str:
-    """保留文件名最短的（更可读）"""
     return min(files, key=lambda x: (len(x), x))
 
 
 def choose_lexicographic(files: List[str]) -> str:
-    """保留字典序最小的（纯稳定排序，便于跨机器一致）"""
     return min(files)
 
 
@@ -102,18 +76,7 @@ STRATEGIES: Dict[str, Callable[[List[str]], str]] = {
 CURRENT_CHOOSE_CANONICAL: Callable[[List[str]], str] = choose_shortest_name
 
 
-# =====================================================================
-# glTF + BIN 定位工具
-# =====================================================================
-
-
 def _same_name_bin_path(gltf_path: str) -> Optional[str]:
-    """
-    按 cad-splitter 约定直接拼同名 .bin。
-
-    命中（返回路径）时无需读取 gltf 内容。
-    未命中返回 None —— 调用方需走 fallback 读 gltf 解析 buffers。
-    """
     base, _ = os.path.splitext(gltf_path)
     cand = base + ".bin"
     if os.path.isfile(cand):
@@ -127,12 +90,6 @@ def _load_gltf_json(gltf_path: str) -> Dict[str, Any]:
 
 
 def _iter_buffers(json_dict: Dict[str, Any], gltf_dir: str):
-    """
-    fallback 路径用：解析 gltf 里 buffers，迭代 (declared, kind, src)：
-        kind == "file" → src 为 .bin 绝对路径
-        kind == "data" → src 为解码后的 bytes
-        kind == "zero" → src 为 None（按声明长度补零）
-    """
     for buf in json_dict.get("buffers", []):
         declared = int(buf.get("byteLength", 0))
         uri = buf.get("uri", "") or ""
@@ -149,9 +106,6 @@ def _iter_buffers(json_dict: Dict[str, Any], gltf_dir: str):
 
 
 def _make_buffer_reader(json_dict: Dict[str, Any], gltf_dir: str):
-    """
-    fallback 路径用：返回 read(buf_idx, offset, length) -> bytes
-    """
     infos = []
     for declared, kind, src in _iter_buffers(json_dict, gltf_dir):
         infos.append((declared, kind, src))
@@ -183,13 +137,7 @@ def _make_buffer_reader(json_dict: Dict[str, Any], gltf_dir: str):
     return read
 
 
-# =====================================================================
-# 规范化 glTF
-# =====================================================================
-
-
 def _canonicalize_gltf(json_dict: Dict[str, Any]) -> Dict[str, Any]:
-    """深拷贝并规范化掉"会随 label / 文件名变化"的字段"""
     normalized = copy.deepcopy(json_dict)
 
     asset = normalized.get("asset")
@@ -203,13 +151,7 @@ def _canonicalize_gltf(json_dict: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
-# =====================================================================
-# 指纹函数
-# =====================================================================
-
-
 def _hash_file_into(h: "hashlib._Hash", path: str) -> None:
-    """流式把一个文件喂给 hash"""
     try:
         with open(path, "rb") as f:
             while True:
@@ -227,7 +169,6 @@ def _update_hash_with_buffer(
     kind: str,
     src,
 ) -> None:
-    """fallback 路径用：把某个 buffer 在声明长度内的字节喂给 hash"""
     if kind == "data":
         h.update(src[:declared] if declared else src)
         return
@@ -263,15 +204,6 @@ def _update_hash_with_buffer(
 
 
 def fingerprint_bins_only(gltf_path: str) -> str:
-    """
-    只对 glTF 关联的 bin 数据做 sha1。
-
-    快速路径（cad-splitter 约定下 100% 命中）：
-        直接按同名规则定位 .bin，hash 整个 bin 文件。**不打开 gltf**。
-
-    fallback（同名 bin 不存在时）：
-        读 gltf 解析 buffers，逐个 source 喂给 hash。
-    """
     h = hashlib.sha1()
     h.update(FINGERPRINT_VERSION)
     h.update(b"|bins|")
@@ -281,7 +213,6 @@ def fingerprint_bins_only(gltf_path: str) -> str:
         _hash_file_into(h, same_name_bin)
         return h.hexdigest()
 
-    # fallback
     try:
         json_dict = _load_gltf_json(gltf_path)
     except Exception:
@@ -295,7 +226,6 @@ def fingerprint_bins_only(gltf_path: str) -> str:
 
 
 def fingerprint_json_normalized(gltf_path: str) -> str:
-    """只对规范化后的 gltf JSON 做 sha1（阶段 B 用）"""
     json_dict = _load_gltf_json(gltf_path)
     normalized = _canonicalize_gltf(json_dict)
     json_bytes = json.dumps(
@@ -314,7 +244,6 @@ def fingerprint_json_normalized(gltf_path: str) -> str:
 
 
 def fingerprint_geometry(gltf_path: str) -> str:
-    """二级指纹：几何指纹（顶点排序 + 索引数）"""
     json_dict = _load_gltf_json(gltf_path)
     gltf_dir = os.path.dirname(gltf_path)
     reader = _make_buffer_reader(json_dict, gltf_dir)
@@ -369,11 +298,6 @@ def fingerprint_geometry(gltf_path: str) -> str:
     return h.hexdigest()
 
 
-# =====================================================================
-# 通用按指纹分组
-# =====================================================================
-
-
 def _dedup_by_fingerprint(
     files: List[str],
     meshs_dir: str,
@@ -389,13 +313,13 @@ def _dedup_by_fingerprint(
         try:
             h = fingerprint_fn(fpath)
         except Exception as e:
-            logger_err(f"{progress_tag} 计算失败 {fname}: {e}")
+            log_err(f"{progress_tag} 计算失败 {fname}: {e}")
             h = f"__err__:{fname}"
 
         group_map.setdefault(h, []).append(fname)
 
         if total >= 100 and (i + 1) % 100 == 0:
-            logger_info(f"{progress_tag} 进度 {i + 1}/{total}")
+            log(f"{progress_tag} 进度 {i + 1}/{total}")
 
     canonicals: List[str] = []
     asset_mapping: Dict[str, str] = {}
@@ -409,26 +333,13 @@ def _dedup_by_fingerprint(
     return canonicals, asset_mapping
 
 
-# =====================================================================
-# 一级去重：先 bin，后 JSON
-# =====================================================================
-
-
 def _dedup_bin_first(
     files: List[str],
     meshs_dir: str,
     choose_canonical: Callable[[List[str]], str],
 ) -> Tuple[List[str], Dict[str, str]]:
-    """
-    两阶段：
-        阶段 A：只对同名 bin 做 sha1，快速淘汰 bin 不同的文件。
-                  不打开 gltf。
-        阶段 B：只对 bin 指纹相同的组做 gltf JSON 规范化指纹。
-                  用来区分 bin 相同但顶层元数据不同的极端情况。
-    """
     total = len(files)
 
-    # ---------- 阶段 A：bin 指纹 ----------
     bin_groups: Dict[str, List[str]] = {}
     fast_hits = 0
     for i, fname in enumerate(files):
@@ -439,16 +350,16 @@ def _dedup_bin_first(
         try:
             bh = fingerprint_bins_only(fpath)
         except Exception as e:
-            logger_err(f"bin 指纹失败 {fname}: {e}")
+            log_err(f"bin 指纹失败 {fname}: {e}")
             bh = f"__err_bin__:{fname}"
         bin_groups.setdefault(bh, []).append(fname)
 
         if total >= 100 and (i + 1) % 100 == 0:
-            logger_info(f"bin 指纹进度 {i + 1}/{total}")
+            log(f"bin 指纹进度 {i + 1}/{total}")
 
     multi_groups = sum(1 for g in bin_groups.values() if len(g) > 1)
     bin_dup_files = sum(len(g) for g in bin_groups.values() if len(g) > 1)
-    logger_info(
+    log(
         f"bin 指纹阶段: {total} 个文件 → {len(bin_groups)} 组"
         f"（其中 {multi_groups} 组 / {bin_dup_files} 个文件需 JSON 指纹细分）；"
         f"同名 bin 快速路径命中 {fast_hits}/{total}"
@@ -457,7 +368,6 @@ def _dedup_bin_first(
     canonicals: List[str] = []
     asset_mapping: Dict[str, str] = {}
 
-    # ---------- 阶段 B：只对 bin 相同的组做 JSON 指纹 ----------
     for _bh, group in bin_groups.items():
         if len(group) == 1:
             only = group[0]
@@ -471,7 +381,7 @@ def _dedup_bin_first(
             try:
                 jh = fingerprint_json_normalized(fpath)
             except Exception as e:
-                logger_err(f"json 指纹失败 {fname}: {e}")
+                log_err(f"json 指纹失败 {fname}: {e}")
                 jh = f"__err_json__:{fname}"
             json_groups.setdefault(jh, []).append(fname)
 
@@ -485,25 +395,14 @@ def _dedup_bin_first(
     return canonicals, asset_mapping
 
 
-# =====================================================================
-# 映射叠加
-# =====================================================================
-
-
 def compose_mappings(
     mapping_prev: Dict[str, str],
     mapping_curr: Dict[str, str],
 ) -> Dict[str, str]:
-    """把两级映射叠加为一级（函数复合 f → c_prev → c_curr）"""
     composed: Dict[str, str] = {}
     for f, c_prev in mapping_prev.items():
         composed[f] = mapping_curr.get(c_prev, c_prev)
     return composed
-
-
-# =====================================================================
-# 分级去重入口
-# =====================================================================
 
 
 def dedup_level_1(
@@ -511,7 +410,6 @@ def dedup_level_1(
     meshs_dir: str,
     choose_canonical: Callable[[List[str]], str] = CURRENT_CHOOSE_CANONICAL,
 ) -> Tuple[List[str], Dict[str, str]]:
-    """一级去重：先 bin 指纹，再对同 bin 组做 JSON 规范化指纹"""
     return _dedup_bin_first(files, meshs_dir, choose_canonical)
 
 
@@ -520,7 +418,6 @@ def dedup_level_2(
     meshs_dir: str,
     choose_canonical: Callable[[List[str]], str] = CURRENT_CHOOSE_CANONICAL,
 ) -> Tuple[List[str], Dict[str, str]]:
-    """二级去重：几何指纹（顶点排序 + 索引数）"""
     return _dedup_by_fingerprint(
         files,
         meshs_dir,
@@ -530,41 +427,29 @@ def dedup_level_2(
     )
 
 
-# =====================================================================
-# JSON 清洗
-# =====================================================================
-
-
-def rewrite_assets(node: Any, asset_mapping: Dict[str, str]) -> None:
-    """递归重写节点树里的 assets / asset 字段"""
+def rewrite_asset(node: Any, asset_mapping: Dict[str, str]) -> None:
+    """递归重写节点树里的 asset 字段"""
     if isinstance(node, dict):
-        for key in ("assets", "asset"):
-            asset = node.get(key)
-            if isinstance(asset, str) and asset:
-                normalized = asset.replace("\\", "/")
-                if "/" in normalized:
-                    prefix, basename = normalized.rsplit("/", 1)
-                else:
-                    prefix, basename = MESHS_SUBDIR, normalized
+        asset = node.get("asset")
+        if isinstance(asset, str) and asset:
+            normalized = asset.replace("\\", "/")
+            if "/" in normalized:
+                prefix, basename = normalized.rsplit("/", 1)
+            else:
+                prefix, basename = MESHS_SUBDIR, normalized
 
-                if basename in asset_mapping:
-                    node[key] = f"{prefix}/{asset_mapping[basename]}"
+            if basename in asset_mapping:
+                node["asset"] = f"{prefix}/{asset_mapping[basename]}"
 
         for child in node.get("children", []) or []:
-            rewrite_assets(child, asset_mapping)
+            rewrite_asset(child, asset_mapping)
 
     elif isinstance(node, list):
         for item in node:
-            rewrite_assets(item, asset_mapping)
-
-
-# =====================================================================
-# 文件复制工具
-# =====================================================================
+            rewrite_asset(item, asset_mapping)
 
 
 def _copy_file(src: str, dst: str) -> None:
-    """复制文件并 fsync 落盘，供下游立刻读取"""
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     with open(src, "rb") as fsrc:
         with open(dst, "wb") as fdst:
@@ -575,11 +460,6 @@ def _copy_file(src: str, dst: str) -> None:
         shutil.copystat(src, dst)
     except Exception:
         pass
-
-
-# =====================================================================
-# 主流程
-# =====================================================================
 
 
 class DedupRunner:
@@ -595,10 +475,6 @@ class DedupRunner:
         self.output_meshs_dir = os.path.join(self.output_dir, MESHS_SUBDIR)
         self.output_tree_json = os.path.join(self.output_dir, TREE_JSON_NAME)
         self.output_report_json = os.path.join(self.output_dir, REPORT_JSON_NAME)
-
-    # -----------------------------------------------------------------
-    # 输入检查
-    # -----------------------------------------------------------------
 
     def _check_inputs(self) -> None:
         if not os.path.isdir(self.input_dir):
@@ -619,143 +495,145 @@ class DedupRunner:
             if os.path.isfile(p)
         )
 
-    # -----------------------------------------------------------------
-    # 输出准备
-    # -----------------------------------------------------------------
-
     def _prepare_output(self) -> None:
         os.makedirs(self.output_dir, exist_ok=True)
         if os.path.isdir(self.output_meshs_dir):
             shutil.rmtree(self.output_meshs_dir)
         os.makedirs(self.output_meshs_dir, exist_ok=True)
 
-    # -----------------------------------------------------------------
-    # 复制 canonical 文件（gltf + 它引用的所有 bin）
-    # -----------------------------------------------------------------
-
     def _copy_canonical_files(self, canonicals: List[str]) -> None:
         total = len(canonicals)
         copied = 0
         fast_hits = 0
+        copied_images: Dict[str, bool] = {}
 
         for c in canonicals:
             src_gltf = os.path.join(self.input_meshs_dir, c)
             dst_gltf = os.path.join(self.output_meshs_dir, c)
 
             if not os.path.isfile(src_gltf):
-                logger_err(f"源文件不存在，跳过: {c}")
+                log_err(f"源文件不存在，跳过: {c}")
                 continue
 
             _copy_file(src_gltf, dst_gltf)
 
-            # 快速路径：同名 bin
             same_name_bin = _same_name_bin_path(src_gltf)
             if same_name_bin is not None:
                 fast_hits += 1
                 bin_name = os.path.basename(same_name_bin)
                 _copy_file(same_name_bin, os.path.join(self.output_meshs_dir, bin_name))
-                copied += 1
-                if total >= 100 and copied % 100 == 0:
-                    logger_info(f"复制进度 {copied}/{total}")
-                continue
+            else:
+                try:
+                    json_dict = _load_gltf_json(src_gltf)
+                except Exception as e:
+                    log_err(f"解析 {c} 失败，跳过 bin: {e}")
+                    json_dict = None
 
-            # fallback：读 gltf 解析 buffers
+                if json_dict is not None:
+                    gltf_dir = os.path.dirname(src_gltf)
+                    for buf in json_dict.get("buffers", []):
+                        uri = buf.get("uri", "") or ""
+                        if not uri or uri.startswith("data:"):
+                            continue
+                        bin_src = os.path.normpath(os.path.join(gltf_dir, uri))
+                        bin_dst = os.path.normpath(
+                            os.path.join(self.output_meshs_dir, uri)
+                        )
+                        if not os.path.isfile(bin_src):
+                            log_err(f"缺失 bin，跳过: {bin_src}")
+                            continue
+                        _copy_file(bin_src, bin_dst)
+
             try:
-                json_dict = _load_gltf_json(src_gltf)
-            except Exception as e:
-                logger_err(f"解析 {c} 失败，仅复制 gltf: {e}")
-                copied += 1
-                continue
+                img_json = _load_gltf_json(src_gltf)
+            except Exception:
+                img_json = None
 
-            gltf_dir = os.path.dirname(src_gltf)
-            for buf in json_dict.get("buffers", []):
-                uri = buf.get("uri", "") or ""
-                if not uri or uri.startswith("data:"):
-                    continue
-                bin_src = os.path.normpath(os.path.join(gltf_dir, uri))
-                bin_dst = os.path.normpath(os.path.join(self.output_meshs_dir, uri))
-                if not os.path.isfile(bin_src):
-                    logger_err(f"缺失 bin，跳过: {bin_src}")
-                    continue
-                _copy_file(bin_src, bin_dst)
+            if img_json is not None:
+                gltf_dir = os.path.dirname(src_gltf)
+                for img in img_json.get("images", []) or []:
+                    uri = img.get("uri", "") or ""
+                    if not uri or uri.startswith("data:"):
+                        continue
+                    if uri in copied_images:
+                        continue
+                    img_src = os.path.normpath(os.path.join(gltf_dir, uri))
+                    img_dst = os.path.normpath(os.path.join(self.output_meshs_dir, uri))
+                    if not os.path.isfile(img_src):
+                        log_err(f"缺失图片，跳过: {img_src}")
+                        copied_images[uri] = True
+                        continue
+                    if not os.path.exists(img_dst):
+                        _copy_file(img_src, img_dst)
+                    copied_images[uri] = True
 
             copied += 1
 
             if total >= 100 and copied % 100 == 0:
-                logger_info(f"复制进度 {copied}/{total}")
+                log(f"复制进度 {copied}/{total}")
 
-        logger_info(
-            f"复制完成: {copied}/{total} 个 gltf（含各自 bin）；"
-            f"同名 bin 快速路径命中 {fast_hits}/{copied}"
+        log(
+            f"复制完成: {copied}/{total} 个 gltf（含各自 bin + 贴图）；"
+            f"同名 bin 快速路径命中 {fast_hits}/{copied}；"
+            f"贴图 {len(copied_images)} 张"
         )
-
-    # -----------------------------------------------------------------
-    # 清洗 JSON
-    # -----------------------------------------------------------------
 
     def _rewrite_tree(self, asset_mapping: Dict[str, str]) -> None:
         with open(self.input_tree_json, "r", encoding="utf-8") as f:
             tree = json.load(f)
 
         non_identity = sum(1 for k, v in asset_mapping.items() if k != v)
-        rewrite_assets(tree, asset_mapping)
+        rewrite_asset(tree, asset_mapping)
 
         with open(self.output_tree_json, "w", encoding="utf-8") as f:
             json.dump(tree, f, ensure_ascii=False, indent=2)
             f.flush()
             os.fsync(f.fileno())
 
-        logger_info(f"重写 assets 引用 {non_identity} 条")
-
-    # -----------------------------------------------------------------
-    # 主流程
-    # -----------------------------------------------------------------
+        log(f"重写 asset 引用 {non_identity} 条")
 
     def run(self) -> None:
         self._check_inputs()
 
-        logger_info(f"输入目录: {self.input_dir}")
-        logger_info(f"输出目录: {self.output_dir}")
-        logger_info(f"去重等级: {self.level}")
+        log(f"输入目录: {self.input_dir}")
+        log(f"输出目录: {self.output_dir}")
+        log(f"去重等级: {self.level}")
 
         files = self._collect_gltfs()
         total = len(files)
         if total == 0:
-            logger_err("meshs/ 目录下没有 .gltf 文件")
+            log_err("meshs/ 目录下没有 .gltf 文件")
             raise RuntimeError("无可处理的 glTF 文件")
 
-        logger_info(f"发现 {total} 个 glTF 文件")
+        log(f"发现 {total} 个 glTF 文件")
 
-        # ---------- 一级去重：先 bin，后 JSON ----------
-        logger_info("一级去重（bin 优先，无 gltf 打开开销）")
+        log("一级去重（bin 优先）")
         canonicals, mapping = dedup_level_1(
             files, self.input_meshs_dir, CURRENT_CHOOSE_CANONICAL
         )
-        logger_info(f"一级去重: {total} → {len(canonicals)}")
+        log(f"一级去重: {total} → {len(canonicals)}")
 
-        # ---------- 二级去重（可选） ----------
         if self.level >= 2:
-            logger_info("二级去重（几何指纹）")
+            log("二级去重（几何指纹）")
             canonicals2, mapping2 = dedup_level_2(
                 canonicals, self.input_meshs_dir, CURRENT_CHOOSE_CANONICAL
             )
             mapping = compose_mappings(mapping, mapping2)
             canonicals = canonicals2
-            logger_info(f"几何去重: {total} → {len(canonicals)}")
+            log(f"几何去重: {total} → {len(canonicals)}")
 
-        # ---------- 应用：复制 + 清洗 JSON ----------
-        logger_info(f"输出准备：复制 {len(canonicals)} 个文件对 ...")
+        log(f"输出准备：复制 {len(canonicals)} 个文件对 ...")
         self._prepare_output()
         self._copy_canonical_files(canonicals)
 
-        logger_info("清洗结构树")
+        log("清洗结构树")
         self._rewrite_tree(mapping)
-        logger_info("清洗结构树完成")
+        log("清洗结构树完成")
 
 
 def main():
     if len(sys.argv) < 3:
-        logger_err(
+        log_err(
             f"参数不足：需要至少 2 个参数（输入目录、输出目录），"
             f"实际收到 {max(0, len(sys.argv) - 1)} 个"
         )
@@ -764,7 +642,7 @@ def main():
         )
         print("说明:")
         print("  <输入目录>    含 assembly-tree.json + meshs/ 的目录")
-        print("                meshs/ 内为 *.gltf + 同名 *.bin")
+        print("                meshs/ 内为 *.gltf + 同名 *.bin + tex_*.png")
         print("  <输出目录>    去重后的产物目录（结构与输入一致）")
         print("  [去重等级]    可选，1 = bin 优先的内容级（默认）；")
         print("                     2 = 内容级 + 几何指纹级联")
@@ -778,17 +656,17 @@ def main():
         try:
             level = int(sys.argv[3])
         except ValueError:
-            logger_err(f"去重等级必须是整数 1 或 2，收到: {sys.argv[3]!r}")
+            log_err(f"去重等级必须是整数 1 或 2，收到: {sys.argv[3]!r}")
             sys.exit(1)
 
         if level not in (1, 2):
-            logger_err(f"去重等级只支持 1 或 2，收到: {level}")
+            log_err(f"去重等级只支持 1 或 2，收到: {level}")
             sys.exit(1)
 
     try:
         DedupRunner(input_dir, output_dir, level).run()
     except Exception as e:
-        logger_err(f"去重失败: {e}")
+        log_err(f"去重失败: {e}")
         sys.exit(1)
 
 

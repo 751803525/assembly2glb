@@ -3,16 +3,20 @@ glb-splitter.py — GLB → glTF + BIN 拆分 + 结构树 JSON 导出
                   保留原始 node 树结构
                   mesh 内容去重：字节级/浮点量化级相同的 mesh 只导出一份 gltf+bin
                   顶点合并：位置量化 + 法线角度聚类 + 面积加权平均
+                  材质：PBR 常量 + 贴图
+                        - 保持原始图片格式（PNG/JPG/WebP/... 不转换）
+                        - 支持三种来源：外部文件 / data URI (base64) / bufferView
+                        - 落盘为 meshs/tex_<内容hash>.<ext>，内容哈希去重
                   IO 走 mmap + array.array，1G+ GLB 不会爆内存
-                  与 cad-splitter.py 输出格式完全对齐（meshs/ + assembly-tree.json）
 
 用法:
     python glb-splitter.py <input.glb> <output.json> [<ignored>]
 
 输出:
-    <output.json>              结构树（与 cad-splitter 格式一致）
+    <output.json>              结构树（材质表引用相对路径的贴图）
     meshs/xxx__hash.gltf       每个带 mesh 的 node 一份 glTF
     meshs/xxx__hash.bin        同名外置 buffer
+    meshs/tex_<hash>.<ext>     贴图（内容哈希去重）
 """
 
 import os
@@ -24,48 +28,37 @@ import struct
 import hashlib
 import mmap
 import array
+import base64
 from typing import Dict, Any, List, Optional, Tuple
 
 # =====================================================================
-# 脚本级配置（走常量，不走 CLI）
+# 脚本级配置
 # =====================================================================
 
 MESHS_SUBDIR = "meshs"
 
-# 顶点处理模式
-#   "preserve"  : 原样搬运，不合并
-#   "normalize" : 位置量化 + 法线聚类 + 面积加权平均（默认）
 VERTEX_MERGE_MODE = "normalize"
-
-# normalize 模式下是否保留 TEXCOORD_0
 KEEP_UV = False
 
-# 平滑角：相邻面夹角 < 此值才共享顶点并平均法线
 SMOOTH_ANGLE_DEG = 30.0
 SMOOTH_ANGLE_COS = math.cos(math.radians(SMOOTH_ANGLE_DEG))
 
-# 是否用面积加权平均重算 NORMAL
 COMPUTE_NORMALS = True
-
-# 顶点位置量化网格（米）。与 cad-splitter 的 VERTEX_POS_GRID 保持一致。
-# 大模型可放大到 1e-4，小模型可缩到 1e-6。
 VERTEX_POS_GRID_METER = 1e-5
 
-# 文件名配置
 FILENAME_NAME_MAX_LEN = 80
 FILENAME_HASH_LEN = 8
+IMAGE_HASH_LEN = 16
 
-# ---- glTF 常量表 ----
 
 COMPONENT_TYPE_SIZE = {
-    5120: 1,  # BYTE
-    5121: 1,  # UNSIGNED_BYTE
-    5122: 2,  # SHORT
-    5123: 2,  # UNSIGNED_SHORT
-    5125: 4,  # UNSIGNED_INT
-    5126: 4,  # FLOAT
+    5120: 1,
+    5121: 1,
+    5122: 2,
+    5123: 2,
+    5125: 4,
+    5126: 4,
 }
-
 COMPONENT_TYPE_FMT = {
     5120: "b",
     5121: "B",
@@ -74,7 +67,6 @@ COMPONENT_TYPE_FMT = {
     5125: "I",
     5126: "f",
 }
-
 TYPE_DIM = {
     "SCALAR": 1,
     "VEC2": 2,
@@ -94,16 +86,43 @@ def log_err(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
-# =====================================================================
-# GLB 容器（mmap 封装）
-# =====================================================================
+def _sniff_image_ext(raw: bytes, mime_hint: str = "") -> str:
+    if len(raw) >= 8 and raw[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    if len(raw) >= 3 and raw[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+    if len(raw) >= 6 and raw[:6] in (b"GIF87a", b"GIF89a"):
+        return ".gif"
+    if len(raw) >= 2 and raw[:2] == b"BM":
+        return ".bmp"
+    if len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return ".webp"
+    if len(raw) >= 12 and raw[:12] == b"\xabKTX 20\xbb\r\n\x1a\n":
+        return ".ktx2"
+    if len(raw) >= 4 and raw[:4] == b"DDS ":
+        return ".dds"
+    if len(raw) >= 4 and raw[:4] == b"\x76\x2f\x31\x01":
+        return ".exr"
+
+    return {
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "image/jpg": ".jpg",
+        "image/webp": ".webp",
+        "image/gif": ".gif",
+        "image/bmp": ".bmp",
+        "image/ktx2": ".ktx2",
+        "image/vnd-ms.dds": ".dds",
+        "image/x-exr": ".exr",
+    }.get((mime_hint or "").lower(), ".bin")
+
+
+def _material_id(mat: dict) -> str:
+    key = json.dumps(mat, sort_keys=True, ensure_ascii=False)
+    return "mat_" + hashlib.md5(key.encode("utf-8")).hexdigest()[:12]
 
 
 class GlbContainer:
-    """
-    mmap 读取 GLB。不把文件读进内存，只保留映射。
-    BIN 段通过 memoryview 暴露给 accessor 读取，零拷贝。
-    """
 
     def __init__(self, path: str):
         self.path = path
@@ -169,18 +188,9 @@ class GlbContainer:
         self.close()
 
     def read_bin_view(self, offset: int, length: int) -> memoryview:
-        """
-        从 BIN 段相对 offset 读 length 字节，返回 memoryview（零拷贝）。
-        必须在 close 之前使用完毕。
-        """
         start = self.bin_offset + offset
         end = start + length
         return memoryview(self.mm)[start:end]
-
-
-# =====================================================================
-# 主拆分器
-# =====================================================================
 
 
 class GlbSplitter:
@@ -196,19 +206,16 @@ class GlbSplitter:
         self.meshs_dir = output_meshs_dir
         self.grid = grid_meter
 
-        # mesh_idx (canonical) -> 相对路径
         self.mesh_cache: Dict[int, str] = {}
-
-        # mesh 去重缓存
         self._mesh_full_sig: Dict[int, bytes] = {}
         self._canonical_by_sig: Dict[bytes, int] = {}
         self._canonical_mesh: Dict[int, int] = {}
 
-        self.keep_uv = True if VERTEX_MERGE_MODE == "preserve" else KEEP_UV
+        self.material_table: Dict[str, dict] = {}
+        self._exported_image_files: Dict[str, str] = {}
+        self._image_idx_to_file: Dict[int, str] = {}
 
-    # -----------------------------------------------------------------
-    # 文件工具
-    # -----------------------------------------------------------------
+        self.keep_uv = True if VERTEX_MERGE_MODE == "preserve" else KEEP_UV
 
     @staticmethod
     def _sanitize_filename(name: str) -> str:
@@ -219,22 +226,157 @@ class GlbSplitter:
         s = re.sub(r"_+", "_", s)
         return s.strip(" ._")
 
-    # -----------------------------------------------------------------
-    # accessor 读取（返回 flat array.array）
-    # -----------------------------------------------------------------
+    def _read_image_raw(self, image_idx: int) -> Optional[Tuple[str, bytes]]:
+        images = self.gltf.get("images", [])
+        if image_idx < 0 or image_idx >= len(images):
+            return None
+        img = images[image_idx]
+        mime = (img.get("mimeType") or "").strip()
+
+        uri = img.get("uri")
+        if uri:
+            if uri.startswith("data:"):
+                header, _, b64 = uri.partition(",")
+                if not mime:
+                    try:
+                        mime = header.split(";")[0].split(":", 1)[1]
+                    except Exception:
+                        mime = ""
+                try:
+                    raw = base64.b64decode(b64)
+                except Exception as e:
+                    log_err(f"[tex] base64 解码失败: {e}")
+                    return None
+                return mime, raw
+            else:
+                img_path = os.path.join(os.path.dirname(self.container.path), uri)
+                try:
+                    with open(img_path, "rb") as f:
+                        raw = f.read()
+                except Exception as e:
+                    log_err(f"[tex] 读取外部贴图失败 {img_path}: {e}")
+                    return None
+                if not mime:
+                    ext = os.path.splitext(uri)[1].lower()
+                    mime = {
+                        ".png": "image/png",
+                        ".jpg": "image/jpeg",
+                        ".jpeg": "image/jpeg",
+                        ".webp": "image/webp",
+                        ".bmp": "image/bmp",
+                        ".gif": "image/gif",
+                        ".ktx2": "image/ktx2",
+                    }.get(ext, "")
+                return mime, raw
+
+        bv_idx = img.get("bufferView")
+        if bv_idx is not None:
+            bv = self.gltf["bufferViews"][bv_idx]
+            base = int(bv.get("byteOffset", 0))
+            length = int(bv["byteLength"])
+            raw = bytes(self.container.read_bin_view(base, length))
+            return mime, raw
+
+        return None
+
+    def _ensure_image_file(self, image_idx: int) -> Optional[str]:
+        if image_idx in self._image_idx_to_file:
+            return self._image_idx_to_file[image_idx]
+
+        result = self._read_image_raw(image_idx)
+        if result is None:
+            return None
+        mime_hint, raw = result
+
+        ext = _sniff_image_ext(raw, mime_hint)
+        content_hash = hashlib.sha1(raw).hexdigest()[:IMAGE_HASH_LEN]
+        filename = f"tex_{content_hash}{ext}"
+
+        if content_hash not in self._exported_image_files:
+            filepath = os.path.join(self.meshs_dir, filename)
+            if not os.path.exists(filepath):
+                try:
+                    with open(filepath, "wb") as f:
+                        f.write(raw)
+                except Exception as e:
+                    log_err(f"[tex] 写图片失败 {filepath}: {e}")
+                    return None
+            self._exported_image_files[content_hash] = filename
+
+        self._image_idx_to_file[image_idx] = filename
+        return filename
+
+    def _resolve_texture_filename(self, gltf_tex_idx: int) -> Optional[str]:
+        textures = self.gltf.get("textures", [])
+        if gltf_tex_idx < 0 or gltf_tex_idx >= len(textures):
+            return None
+        src = textures[gltf_tex_idx].get("source")
+        if src is None:
+            return None
+        return self._ensure_image_file(int(src))
+
+    def register_material(self, mat_idx: int) -> Optional[str]:
+        materials = self.gltf.get("materials", [])
+        if mat_idx < 0 or mat_idx >= len(materials):
+            return None
+        src = materials[mat_idx]
+
+        pbr = src.get("pbrMetallicRoughness", {}) or {}
+        bc = pbr.get("baseColorFactor", [1.0, 1.0, 1.0, 1.0])
+        try:
+            r, g, b = float(bc[0]), float(bc[1]), float(bc[2])
+            a = float(bc[3]) if len(bc) > 3 else 1.0
+        except Exception:
+            r = g = b = 1.0
+            a = 1.0
+
+        mat: Dict[str, Any] = {
+            "source": "pbr",
+            "base_color": [round(r, 4), round(g, 4), round(b, 4), round(a, 4)],
+            "metallic": round(float(pbr.get("metallicFactor", 1.0)), 4),
+            "roughness": round(float(pbr.get("roughnessFactor", 1.0)), 4),
+        }
+
+        ef = src.get("emissiveFactor")
+        if ef:
+            try:
+                mat["emissive_factor"] = [round(float(x), 4) for x in ef[:3]]
+            except Exception:
+                pass
+
+        if src.get("alphaMode") == "BLEND":
+            mat["alpha_mode"] = "BLEND"
+        if src.get("doubleSided"):
+            mat["double_sided"] = True
+
+        tex_map = [
+            ("base_color_texture", pbr.get("baseColorTexture")),
+            ("metallic_roughness_texture", pbr.get("metallicRoughnessTexture")),
+            ("normal_texture", src.get("normalTexture")),
+            ("occlusion_texture", src.get("occlusionTexture")),
+            ("emissive_texture", src.get("emissiveTexture")),
+        ]
+        for our_key, tex_info in tex_map:
+            if not tex_info:
+                continue
+            tex_idx = tex_info.get("index")
+            if tex_idx is None:
+                continue
+            filename = self._resolve_texture_filename(int(tex_idx))
+            if filename:
+                mat[our_key] = filename
+
+        mid = _material_id(mat)
+        if mid not in self.material_table:
+            self.material_table[mid] = mat
+        return mid
 
     def read_accessor_array(self, acc_idx: int) -> array.array:
-        """
-        返回一个 flat 的 array.array，类型与 accessor 的 componentType 一致。
-        VEC3 float → array('f')，长度 = count * 3
-        SCALAR uint16 → array('H')，长度 = count
-        """
         acc = self.gltf["accessors"][acc_idx]
         count = int(acc["count"])
         num_comp = TYPE_DIM[acc["type"]]
         comp_type = int(acc["componentType"])
         typecode = COMPONENT_TYPE_FMT[comp_type]
-
         total_elems = count * num_comp
 
         bv_idx = acc.get("bufferView")
@@ -258,13 +400,11 @@ class GlbSplitter:
             return array.array(typecode)
 
         if stride == elem_size:
-            # 紧密排列：一次性从 mmap 视图拷贝到 array
             mv = self.container.read_bin_view(base, total_elems * comp_size)
             arr = array.array(typecode)
             arr.frombytes(mv)
             return arr
 
-        # 交错排列：逐元素拷贝
         arr = array.array(typecode)
         for i in range(count):
             off = base + i * stride
@@ -272,22 +412,7 @@ class GlbSplitter:
             arr.frombytes(mv)
         return arr
 
-    # -----------------------------------------------------------------
-    # mesh 内容指纹（量化）
-    # -----------------------------------------------------------------
-
     def _mesh_full_signature(self, mesh_idx: int) -> bytes:
-        """
-        全量指纹：读全部 accessor 数据算 sha1。
-
-        FLOAT 类型的 accessor（POSITION / NORMAL / TEXCOORD 等）在算指纹前
-        先量化到 VERTEX_POS_GRID_METER 网格，消除浮点尾差，让"几何相同
-        但末位浮点不同"的 mesh 能被判定为同一个。
-        整型 accessor（索引）不做量化。
-
-        量化结果以 int64 写入哈希，避免 round 后重新编码成 float32 时
-        精度再次丢失。
-        """
         if mesh_idx in self._mesh_full_sig:
             return self._mesh_full_sig[mesh_idx]
 
@@ -296,8 +421,13 @@ class GlbSplitter:
         inv_grid = 1.0 / self.grid
 
         for prim in mesh.get("primitives", []):
-            mode = int(prim.get("mode", 4))
-            h.update(struct.pack("<I", mode))
+            h.update(struct.pack("<I", int(prim.get("mode", 4))))
+
+            mat_idx = prim.get("material")
+            if mat_idx is not None:
+                mid = self.register_material(int(mat_idx))
+                if mid:
+                    h.update(mid.encode("ascii"))
 
             attrs = prim.get("attributes", {})
             for k in sorted(attrs.keys()):
@@ -311,24 +441,20 @@ class GlbSplitter:
                 h.update(struct.pack("<III", count, comp_type, type_dim))
 
                 arr = self.read_accessor_array(acc_idx)
-
-                if comp_type == 5126:  # FLOAT：量化到 grid
+                if comp_type == 5126:
                     q = array.array("q")
                     for v in arr:
                         q.append(int(round(v * inv_grid)))
                     h.update(q.tobytes())
                     del q
                 else:
-                    # 整型（索引等）：原样
                     h.update(arr.tobytes())
-
                 del arr
 
             idx_idx = prim.get("indices")
             if idx_idx is not None:
                 acc = self.gltf["accessors"][idx_idx]
-                count = int(acc["count"])
-                h.update(struct.pack("<I", count))
+                h.update(struct.pack("<I", int(acc["count"])))
                 arr = self.read_accessor_array(idx_idx)
                 h.update(arr.tobytes())
                 del arr
@@ -338,34 +464,21 @@ class GlbSplitter:
         return sig
 
     def resolve_canonical_mesh(self, mesh_idx: int) -> int:
-        """
-        返回 mesh 的 canonical idx：
-          - 内容相同（量化后）的一组 mesh 共享同一个 canonical
-          - 只处理一次，后续 O(1) 查询
-        """
         if mesh_idx in self._canonical_mesh:
             return self._canonical_mesh[mesh_idx]
-
         full_sig = self._mesh_full_signature(mesh_idx)
-
         canonical = self._canonical_by_sig.get(full_sig)
         if canonical is None:
             canonical = mesh_idx
             self._canonical_by_sig[full_sig] = mesh_idx
-
         self._canonical_mesh[mesh_idx] = canonical
         return canonical
-
-    # -----------------------------------------------------------------
-    # transform 分解
-    # -----------------------------------------------------------------
 
     @staticmethod
     def _decompose_matrix(
         m: List[float],
     ) -> Tuple[List[float], List[float], List[float]]:
         tx, ty, tz = m[12], m[13], m[14]
-
         c0 = (m[0], m[1], m[2])
         c1 = (m[4], m[5], m[6])
         c2 = (m[8], m[9], m[10])
@@ -432,17 +545,13 @@ class GlbSplitter:
             "scale": scale_out,
         }
 
-    # -----------------------------------------------------------------
-    # 顶点合并（normalize）
-    # -----------------------------------------------------------------
-
     def _merge_vertices(
         self,
-        positions: array.array,  # flat [x,y,z,...]
-        normals: Optional[array.array],  # flat [x,y,z,...] or None
-        uvs: Optional[array.array],  # flat [u,v,...] or None
-        indices: array.array,  # [i0,i1,i2,...]
-        vertex_offset: int,  # 输出索引的整体偏移
+        positions: array.array,
+        normals: Optional[array.array],
+        uvs: Optional[array.array],
+        indices: array.array,
+        vertex_offset: int,
     ) -> Tuple[array.array, array.array, Optional[array.array], array.array]:
         num_verts = len(positions) // 3
         num_tris = len(indices) // 3
@@ -453,20 +562,16 @@ class GlbSplitter:
         if num_verts == 0:
             return empty_f, empty_f, (empty_f if self.keep_uv else None), empty_i
 
-        # 每个顶点的面积权重（相邻三角形面积之和）
         node_area = array.array("f", bytes(4 * num_verts))
-        # 每个三角形的叉积（未归一化，模长 = 2 * area）
         tri_cross = array.array("f", bytes(12 * num_tris))
 
         for ti in range(num_tris):
             i0 = indices[ti * 3]
             i1 = indices[ti * 3 + 1]
             i2 = indices[ti * 3 + 2]
-
             v0i = i0 * 3
             v1i = i1 * 3
             v2i = i2 * 3
-
             v0x = positions[v0i]
             v0y = positions[v0i + 1]
             v0z = positions[v0i + 2]
@@ -492,13 +597,11 @@ class GlbSplitter:
             tri_cross[ti3] = cx
             tri_cross[ti3 + 1] = cy
             tri_cross[ti3 + 2] = cz
-
             area = 0.5 * math.sqrt(cx * cx + cy * cy + cz * cz)
             node_area[i0] += area
             node_area[i1] += area
             node_area[i2] += area
 
-        # 计算每个顶点的法线
         if COMPUTE_NORMALS:
             acc = array.array("f", bytes(12 * num_verts))
             for ti in range(num_tris):
@@ -509,11 +612,9 @@ class GlbSplitter:
                 cx = tri_cross[ti3]
                 cy = tri_cross[ti3 + 1]
                 cz = tri_cross[ti3 + 2]
-
                 a0 = i0 * 3
                 a1 = i1 * 3
                 a2 = i2 * 3
-
                 acc[a0] += cx
                 acc[a0 + 1] += cy
                 acc[a0 + 2] += cz
@@ -548,30 +649,24 @@ class GlbSplitter:
 
         del tri_cross
 
-        # 位置量化 + 法线聚类
         inv_grid = 1.0 / self.grid
         MASK32 = 0xFFFFFFFF
 
         buckets: Dict[int, List[dict]] = {}
         node_to_cluster_idx = array.array("I", bytes(4 * num_verts))
-
         cluster_positions = array.array("f")
         cluster_normals_acc = array.array("f")
         cluster_uvs = array.array("f") if self.keep_uv else None
-
         has_uv_global = self.keep_uv and uvs is not None and len(uvs) >= num_verts * 2
 
         for vi in range(num_verts):
             v3 = vi * 3
-
             px = positions[v3]
             py = positions[v3 + 1]
             pz = positions[v3 + 2]
-
             nx = vertex_normals[v3]
             ny = vertex_normals[v3 + 1]
             nz = vertex_normals[v3 + 2]
-
             w = node_area[vi]
             if w <= 0.0:
                 w = 1e-12
@@ -579,7 +674,6 @@ class GlbSplitter:
             qx = int(round(px * inv_grid))
             qy = int(round(py * inv_grid))
             qz = int(round(pz * inv_grid))
-
             key = ((qx & MASK32) << 64) | ((qy & MASK32) << 32) | (qz & MASK32)
 
             blist = buckets.get(key)
@@ -642,7 +736,6 @@ class GlbSplitter:
         del node_area
         del vertex_normals
 
-        # 归一化 cluster 法线
         num_clusters = len(cluster_positions) // 3
         out_normals = array.array("f", bytes(12 * num_clusters))
         for ci in range(num_clusters):
@@ -662,7 +755,6 @@ class GlbSplitter:
 
         del cluster_normals_acc
 
-        # 重建索引
         new_indices = array.array("I", bytes(4 * len(indices)))
         for j in range(len(indices)):
             new_indices[j] = node_to_cluster_idx[indices[j]] + vertex_offset
@@ -671,13 +763,8 @@ class GlbSplitter:
 
         return cluster_positions, out_normals, cluster_uvs, new_indices
 
-    # -----------------------------------------------------------------
-    # 单个 mesh 导出（先做 canonical 映射）
-    # -----------------------------------------------------------------
-
     def export_mesh(self, mesh_idx: int, display_name: str) -> Optional[str]:
         canonical = self.resolve_canonical_mesh(mesh_idx)
-
         if canonical in self.mesh_cache:
             return self.mesh_cache[canonical]
 
@@ -687,9 +774,10 @@ class GlbSplitter:
         all_positions = array.array("f")
         all_normals = array.array("f")
         all_uvs = array.array("f")
-        all_indices = array.array("I")
-        vertex_offset = 0
         any_uv = False
+        vertex_offset = 0
+
+        out_prims: List[Tuple[array.array, Optional[int]]] = []
 
         for prim in mesh.get("primitives", []):
             mode = int(prim.get("mode", 4))
@@ -717,20 +805,21 @@ class GlbSplitter:
             idx_acc_idx = prim.get("indices")
             if idx_acc_idx is not None:
                 raw_idx = self.read_accessor_array(idx_acc_idx)
-                if raw_idx.typecode == "I":
-                    indices = raw_idx
-                else:
-                    indices = array.array("I", raw_idx)
+                indices = (
+                    raw_idx if raw_idx.typecode == "I" else array.array("I", raw_idx)
+                )
             else:
                 num_v = len(positions) // 3
                 indices = array.array("I", range(num_v))
 
             if VERTEX_MERGE_MODE == "preserve":
                 new_positions = positions
-                if normals is not None:
-                    new_normals = normals
-                else:
-                    new_normals = array.array("f", bytes(len(positions) * 4))
+                new_normals = (
+                    normals
+                    if normals is not None
+                    else array.array("f", bytes(len(positions) * 4))
+                )
+                if normals is None:
                     for vi in range(len(positions) // 3):
                         new_normals[vi * 3 + 2] = 1.0
                 new_uvs = uvs
@@ -747,16 +836,164 @@ class GlbSplitter:
             if self.keep_uv and new_uvs is not None:
                 all_uvs.extend(new_uvs)
                 any_uv = True
-            all_indices.extend(new_indices)
             vertex_offset += len(new_positions) // 3
 
-        if len(all_positions) == 0:
+            src_mat_idx = prim.get("material")
+            out_prims.append(
+                (
+                    new_indices,
+                    int(src_mat_idx) if src_mat_idx is not None else None,
+                )
+            )
+
+        if not out_prims or len(all_positions) == 0:
             return None
 
         num_verts = len(all_positions) // 3
-        num_indices = len(all_indices)
 
-        # 计算 bbox
+        out_materials: List[dict] = []
+        out_textures: List[dict] = []
+        out_images: List[dict] = []
+        out_samplers: List[dict] = []
+
+        src_materials = self.gltf.get("materials", [])
+        src_textures = self.gltf.get("textures", [])
+        src_samplers = self.gltf.get("samplers", [])
+
+        tex_map: Dict[int, int] = {}
+        smp_map: Dict[int, int] = {}
+        img_map: Dict[int, int] = {}
+
+        def ensure_sampler(si: int) -> Optional[int]:
+            if si in smp_map:
+                return smp_map[si]
+            if si < 0 or si >= len(src_samplers):
+                return None
+            new_idx = len(out_samplers)
+            out_samplers.append(dict(src_samplers[si]))
+            smp_map[si] = new_idx
+            return new_idx
+
+        def ensure_image(im_idx: int) -> Optional[int]:
+            if im_idx in img_map:
+                return img_map[im_idx]
+            filename = self._ensure_image_file(im_idx)
+            if filename is None:
+                return None
+            new_idx = len(out_images)
+            out_images.append({"uri": filename})
+            img_map[im_idx] = new_idx
+            return new_idx
+
+        def ensure_texture(ti: int) -> Optional[int]:
+            if ti in tex_map:
+                return tex_map[ti]
+            if ti < 0 or ti >= len(src_textures):
+                return None
+            src_tex = src_textures[ti]
+            new_tex: Dict[str, Any] = {}
+            src_img = src_tex.get("source")
+            if src_img is not None:
+                ni = ensure_image(int(src_img))
+                if ni is None:
+                    return None
+                new_tex["source"] = ni
+            src_smp = src_tex.get("sampler")
+            if src_smp is not None:
+                ns = ensure_sampler(int(src_smp))
+                if ns is not None:
+                    new_tex["sampler"] = ns
+            new_idx = len(out_textures)
+            out_textures.append(new_tex)
+            tex_map[ti] = new_idx
+            return new_idx
+
+        def convert_material(src_mat_idx: int) -> Optional[int]:
+            if src_mat_idx < 0 or src_mat_idx >= len(src_materials):
+                return None
+            src = src_materials[src_mat_idx]
+            new_mat: Dict[str, Any] = {}
+
+            for k, v in src.items():
+                if k == "pbrMetallicRoughness":
+                    new_pbr = dict(v)
+                    for tk in ("baseColorTexture", "metallicRoughnessTexture"):
+                        if tk in new_pbr and new_pbr[tk]:
+                            ti = new_pbr[tk].get("index")
+                            if ti is not None:
+                                nt = ensure_texture(int(ti))
+                                if nt is None:
+                                    new_pbr.pop(tk, None)
+                                else:
+                                    new_ti = dict(new_pbr[tk])
+                                    new_ti["index"] = nt
+                                    new_pbr[tk] = new_ti
+                    new_mat["pbrMetallicRoughness"] = new_pbr
+                elif k in ("normalTexture", "occlusionTexture", "emissiveTexture"):
+                    if v and isinstance(v, dict):
+                        ti = v.get("index")
+                        if ti is not None:
+                            nt = ensure_texture(int(ti))
+                            if nt is None:
+                                continue
+                            new_tex_info = dict(v)
+                            new_tex_info["index"] = nt
+                            new_mat[k] = new_tex_info
+                        else:
+                            new_mat[k] = v
+                    else:
+                        new_mat[k] = v
+                else:
+                    new_mat[k] = v
+
+            new_idx = len(out_materials)
+            out_materials.append(new_mat)
+            return new_idx
+
+        src_mat_to_new: Dict[int, int] = {}
+        for _, src_mat_idx in out_prims:
+            if src_mat_idx is None:
+                continue
+            if src_mat_idx in src_mat_to_new:
+                continue
+            nm = convert_material(src_mat_idx)
+            if nm is not None:
+                src_mat_to_new[src_mat_idx] = nm
+
+        v_bytes = all_positions.tobytes()
+        n_bytes = all_normals.tobytes()
+        u_bytes: Optional[bytes] = None
+        if self.keep_uv and any_uv and len(all_uvs) > 0:
+            u_bytes = all_uvs.tobytes()
+
+        def pad4(b: bytes) -> bytes:
+            rem = (-len(b)) % 4
+            return b if rem == 0 else b + b"\x00" * rem
+
+        v_bytes = pad4(v_bytes)
+        n_bytes = pad4(n_bytes)
+        if u_bytes is not None:
+            u_bytes = pad4(u_bytes)
+
+        prim_idx_bytes: List[bytes] = []
+        for indices_arr, _ in out_prims:
+            prim_idx_bytes.append(pad4(indices_arr.tobytes()))
+
+        bin_buffer = bytearray()
+        v_offset = len(bin_buffer)
+        bin_buffer.extend(v_bytes)
+        n_offset = len(bin_buffer)
+        bin_buffer.extend(n_bytes)
+        u_offset: Optional[int] = None
+        if u_bytes is not None:
+            u_offset = len(bin_buffer)
+            bin_buffer.extend(u_bytes)
+
+        i_offsets: List[int] = []
+        for ib in prim_idx_bytes:
+            i_offsets.append(len(bin_buffer))
+            bin_buffer.extend(ib)
+
         min_pos = [float("inf")] * 3
         max_pos = [float("-inf")] * 3
         for vi in range(num_verts):
@@ -768,38 +1005,6 @@ class GlbSplitter:
                 if v > max_pos[k]:
                     max_pos[k] = v
 
-        # 序列化
-        v_bytes = all_positions.tobytes()
-        n_bytes = all_normals.tobytes()
-        u_bytes: Optional[bytes] = None
-        if self.keep_uv and any_uv and len(all_uvs) > 0:
-            u_bytes = all_uvs.tobytes()
-        i_bytes = all_indices.tobytes()
-
-        def pad4(b: bytes) -> bytes:
-            rem = (-len(b)) % 4
-            return b if rem == 0 else b + b"\x00" * rem
-
-        v_bytes = pad4(v_bytes)
-        n_bytes = pad4(n_bytes)
-        if u_bytes is not None:
-            u_bytes = pad4(u_bytes)
-        i_bytes = pad4(i_bytes)
-
-        bin_buffer = bytearray()
-        v_offset = len(bin_buffer)
-        bin_buffer.extend(v_bytes)
-        n_offset = len(bin_buffer)
-        bin_buffer.extend(n_bytes)
-        u_offset: Optional[int] = None
-        if u_bytes is not None:
-            u_offset = len(bin_buffer)
-            bin_buffer.extend(u_bytes)
-        i_offset = len(bin_buffer)
-        bin_buffer.extend(i_bytes)
-
-        # ---- accessors & bufferViews ----
-        attributes: Dict[str, int] = {"POSITION": 0, "NORMAL": 1}
         buffer_views: List[dict] = [
             {
                 "buffer": 0,
@@ -835,6 +1040,8 @@ class GlbSplitter:
         next_bv = 2
         next_acc = 2
 
+        attributes: Dict[str, int] = {"POSITION": 0, "NORMAL": 1}
+
         if u_bytes is not None:
             buffer_views.append(
                 {
@@ -857,26 +1064,40 @@ class GlbSplitter:
             next_bv += 1
             next_acc += 1
 
-        buffer_views.append(
-            {
-                "buffer": 0,
-                "byteOffset": i_offset,
-                "byteLength": len(i_bytes),
-                "target": 34963,
-            }
-        )
-        accessors.append(
-            {
-                "bufferView": next_bv,
-                "byteOffset": 0,
-                "componentType": 5125,
-                "count": num_indices,
-                "type": "SCALAR",
-            }
-        )
-        index_accessor_idx = next_acc
+        prim_indices_accessor: List[int] = []
+        for pi, (indices_arr, _) in enumerate(out_prims):
+            buffer_views.append(
+                {
+                    "buffer": 0,
+                    "byteOffset": i_offsets[pi],
+                    "byteLength": len(prim_idx_bytes[pi]),
+                    "target": 34963,
+                }
+            )
+            accessors.append(
+                {
+                    "bufferView": next_bv,
+                    "byteOffset": 0,
+                    "componentType": 5125,
+                    "count": len(indices_arr),
+                    "type": "SCALAR",
+                }
+            )
+            prim_indices_accessor.append(next_acc)
+            next_bv += 1
+            next_acc += 1
 
-        # ---- 文件名 ----
+        out_primitives: List[dict] = []
+        for pi, (indices_arr, src_mat_idx) in enumerate(out_prims):
+            p: Dict[str, Any] = {
+                "attributes": attributes,
+                "indices": prim_indices_accessor[pi],
+                "mode": 4,
+            }
+            if src_mat_idx is not None and src_mat_idx in src_mat_to_new:
+                p["material"] = src_mat_to_new[src_mat_idx]
+            out_primitives.append(p)
+
         safe_name = self._sanitize_filename(mesh_name)[:FILENAME_NAME_MAX_LEN] or "mesh"
         short_hash = hashlib.sha1(str(canonical).encode("utf-8")).hexdigest()[
             :FILENAME_HASH_LEN
@@ -887,26 +1108,24 @@ class GlbSplitter:
         gltf_path = os.path.join(self.meshs_dir, gltf_filename)
         bin_path = os.path.join(self.meshs_dir, bin_filename)
 
-        gltf_dict = {
+        gltf_dict: Dict[str, Any] = {
             "asset": {"version": "2.0", "generator": "glb-splitter"},
             "scene": 0,
             "scenes": [{"nodes": [0]}],
             "nodes": [{"mesh": 0}],
-            "meshes": [
-                {
-                    "primitives": [
-                        {
-                            "attributes": attributes,
-                            "indices": index_accessor_idx,
-                            "mode": 4,
-                        }
-                    ]
-                }
-            ],
+            "meshes": [{"primitives": out_primitives}],
             "buffers": [{"byteLength": len(bin_buffer), "uri": bin_filename}],
             "bufferViews": buffer_views,
             "accessors": accessors,
         }
+        if out_samplers:
+            gltf_dict["samplers"] = out_samplers
+        if out_images:
+            gltf_dict["images"] = out_images
+        if out_textures:
+            gltf_dict["textures"] = out_textures
+        if out_materials:
+            gltf_dict["materials"] = out_materials
 
         with open(bin_path, "wb") as f:
             f.write(bin_buffer)
@@ -919,9 +1138,17 @@ class GlbSplitter:
         self.mesh_cache[canonical] = rel
         return rel
 
-    # -----------------------------------------------------------------
-    # node 树构建
-    # -----------------------------------------------------------------
+    def _collect_mesh_mat_ids(self, mesh_idx: int) -> List[str]:
+        mesh = self.gltf["meshes"][mesh_idx]
+        ids: List[str] = []
+        for prim in mesh.get("primitives", []):
+            mat_idx = prim.get("material")
+            if mat_idx is None:
+                continue
+            mid = self.register_material(int(mat_idx))
+            if mid and mid not in ids:
+                ids.append(mid)
+        return ids
 
     def build_node(self, node_idx: int) -> Dict[str, Any]:
         node = self.gltf["nodes"][node_idx]
@@ -935,6 +1162,8 @@ class GlbSplitter:
 
         if mesh_idx is not None:
             asset = self.export_mesh(mesh_idx, name)
+            mat_ids = self._collect_mesh_mat_ids(mesh_idx)
+
             out: Dict[str, Any] = {
                 "id": str(node_idx),
                 "name": name,
@@ -943,7 +1172,9 @@ class GlbSplitter:
                 "children": child_nodes,
             }
             if asset:
-                out["assets"] = asset
+                out["asset"] = asset
+            if mat_ids:
+                out["material"] = mat_ids
             return out
 
         return {
@@ -953,11 +1184,6 @@ class GlbSplitter:
             "transform": transform,
             "children": child_nodes,
         }
-
-
-# =====================================================================
-# 主流程
-# =====================================================================
 
 
 def split_glb(input_path: str, output_json: str, grid_meter: float) -> None:
@@ -997,10 +1223,16 @@ def split_glb(input_path: str, output_json: str, grid_meter: float) -> None:
                 "children": children,
             }
 
-        tree["materials"] = {}
+        tree["materials"] = exporter.material_table
 
-        unique_meshes = len(exporter.mesh_cache)
-        log(f"[mesh] 唯一 glTF {unique_meshes} 个，材质 0 个")
+        unique_meshes = len(
+            [k for k in exporter.mesh_cache.keys() if isinstance(k, int)]
+        )
+        log(
+            f"[mesh] 唯一 glTF {unique_meshes} 个，"
+            f"材质 {len(exporter.material_table)} 个，"
+            f"贴图 {len(exporter._exported_image_files)} 张"
+        )
 
         with open(output_json, "w", encoding="utf-8") as f:
             json.dump(tree, f, ensure_ascii=False, indent=2)
@@ -1015,9 +1247,6 @@ def main() -> None:
 
     input_path = sys.argv[1]
     output_json = sys.argv[2]
-
-    # 兼容上游可能多传的参数位（如 deflection），静默忽略
-    # 保持与 cad-splitter.py 相同的 CLI 调用格式
 
     log(
         f"[unit] 顶点量化网格: {VERTEX_POS_GRID_METER} 米 "

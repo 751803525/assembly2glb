@@ -54,7 +54,6 @@ from OCC.Core.TopLoc import TopLoc_Location
 DEFAULT_DEFLECTION = 0.1
 DEFAULT_NODE_NAME = "Node"
 
-# 输出子目录名（glTF + BIN 都放这里）
 MESHS_SUBDIR = "meshs"
 
 FILENAME_NAME_MAX_LEN = 80
@@ -62,16 +61,13 @@ FILENAME_HASH_LEN = 8
 
 FALLBACK_UNIT_TO_METER = 0.001
 
-# 平滑角：相邻面夹角 < 此值才共享顶点并平均法线
 SMOOTH_ANGLE_DEG = 30.0
 SMOOTH_ANGLE_COS = math.cos(math.radians(SMOOTH_ANGLE_DEG))
 
-# 顶点位置量化网格（米）。大模型可放大到 1e-4，小模型可缩到 1e-6
 VERTEX_POS_GRID = 1e-5
 
 _PLACEHOLDER_NAME_PREFIXES = ("=>", "=[")
 
-# 多体零件里的"无名 body"名字白名单
 _BODY_TYPE_NAMES = {"SOLID", "SHELL", "COMPOUND", "COMPSOLID"}
 
 _SI_PREFIX_TO_METER = {
@@ -380,17 +376,9 @@ class CadToGlbConverter:
     # ---------------- 三角化 + 面积加权平均法线 ----------------
 
     def _triangulate_with_surface_normals(self, shape):
-        """
-        两阶段算法：
-          阶段 1：逐 face 采样顶点位置、曲面法线、三角形；
-          阶段 2：按位置量化 + 法线角度聚类，每个 cluster 的法线 = 簇内
-                  所有贡献节点法线的面积加权平均；
-          阶段 3：输出顶点与三角形索引。
-        """
         mesh = BRepMesh_IncrementalMesh(shape, self.deflection, False, 0.5, True)
         mesh.Perform()
 
-        # ================= 阶段 1：收集每个 face 的几何 =================
         faces_payload = []
 
         explorer = TopExp_Explorer(shape, TopAbs_FACE)
@@ -448,16 +436,14 @@ class CadToGlbConverter:
                     except Exception:
                         pass
 
-            # 三角形（0-based 索引）
             triangles = []
             for ti in range(1, triangulation.NbTriangles() + 1):
                 t = triangulation.Triangle(ti)
                 a, b, c = t.Get()
                 triangles.append((a - 1, b - 1, c - 1))
 
-            # 缺 UV 法线的节点 → 用相邻三角形面法线的面积加权兜底
             if any(n is None for n in face_normals):
-                node_acc = [None] * n_nodes  # (acc_normal, acc_area)
+                node_acc = [None] * n_nodes
                 for a, b, c in triangles:
                     v0 = face_verts[a]
                     v1 = face_verts[b]
@@ -476,7 +462,7 @@ class CadToGlbConverter:
                         nx, ny, nz = -nx, -ny, -nz
                     for vi in (a, b, c):
                         if node_acc[vi] is None:
-                            node_acc[vi] = [0.0, 0.0, 0.0, 0.0]  # nx,ny,nz,area
+                            node_acc[vi] = [0.0, 0.0, 0.0, 0.0]
                         node_acc[vi][0] += nx * area
                         node_acc[vi][1] += ny * area
                         node_acc[vi][2] += nz * area
@@ -495,7 +481,6 @@ class CadToGlbConverter:
                     else:
                         face_normals[i] = (acc[0] / ln, acc[1] / ln, acc[2] / ln)
 
-            # 计算每个节点的面积权重 = 相邻三角形面积之和
             node_area = [0.0] * n_nodes
             for a, b, c in triangles:
                 v0 = face_verts[a]
@@ -530,7 +515,6 @@ class CadToGlbConverter:
         if not faces_payload:
             return None
 
-        # ================= 阶段 2：位置量化 + 法线聚类 + 面积加权累加 =========
         GRID = VERTEX_POS_GRID
 
         def _quantize(p):
@@ -557,7 +541,6 @@ class CadToGlbConverter:
                     n = (0.0, 0.0, 1.0)
                 w = areas[ni]
                 if w <= 0.0:
-                    # 退化三角形附近的孤立节点：给极小的权重但仍参与
                     w = 1e-12
 
                 key = _quantize(p)
@@ -574,7 +557,7 @@ class CadToGlbConverter:
                 if matched is None:
                     cl = {
                         "pos": p,
-                        "ref_normal": n,  # 贪心聚类的固定参考法线
+                        "ref_normal": n,
                         "acc_normal": [n[0] * w, n[1] * w, n[2] * w],
                         "acc_weight": w,
                         "vertex_idx": -1,
@@ -591,7 +574,6 @@ class CadToGlbConverter:
 
                 node_to_cluster[(fid, ni)] = matched
 
-        # ================= 阶段 3：输出顶点 + 加权平均法线 =================
         vertices: List[float] = []
         out_normals: List[float] = []
 
@@ -607,7 +589,6 @@ class CadToGlbConverter:
             vertices.extend(cl["pos"])
             out_normals.extend(n)
 
-        # ================= 阶段 4：三角形索引 =================
         indices: List[int] = []
         for fp in faces_payload:
             fid = fp["face_id"]
@@ -663,7 +644,6 @@ class CadToGlbConverter:
         for idx in indices:
             i_bytes.extend(struct.pack(idx_fmt, idx))
 
-        # bufferView 偏移需 4 字节对齐
         while len(v_bytes) % 4 != 0:
             v_bytes.extend(b"\x00")
         while len(n_bytes) % 4 != 0:
@@ -703,7 +683,6 @@ class CadToGlbConverter:
             materials_json.append(mat_json)
             primitive["material"] = 0
 
-        # .bin 与 .gltf 同名、同目录
         gltf_basename = os.path.basename(output_gltf_path)
         if gltf_basename.lower().endswith(".gltf"):
             bin_basename = gltf_basename[:-5] + ".bin"
@@ -767,11 +746,9 @@ class CadToGlbConverter:
         if materials_json:
             gltf_dict["materials"] = materials_json
 
-        # 写 .bin
         with open(output_bin_path, "wb") as fb:
             fb.write(bin_buffer)
 
-        # 写 .gltf
         with open(output_gltf_path, "w", encoding="utf-8") as fj:
             json.dump(gltf_dict, fj, separators=(",", ":"))
 
@@ -897,7 +874,6 @@ class CadToGlbConverter:
             except Exception:
                 pass
 
-        # ---- 装配体 ----
         if is_asm:
             components = TDF_LabelSequence()
             self.shape_tool.GetComponents(label, components)
@@ -916,7 +892,6 @@ class CadToGlbConverter:
                     if child:
                         children.append(child)
 
-            # 单子节点且无自身变换 → 折叠
             if (
                 len(children) == 1
                 and position == [0.0, 0.0, 0.0]
@@ -924,7 +899,6 @@ class CadToGlbConverter:
             ):
                 return children[0]
 
-            # 多体零件合并：children 全为无名 body 且 identity transform
             if self._is_body_container(children):
                 merged_shape = self._merge_children_shapes(children)
                 if merged_shape is not None:
@@ -956,7 +930,6 @@ class CadToGlbConverter:
                         node["_material_ids"] = mat_ids
                     return node
 
-            # 正常装配节点
             return {
                 "id": node_id,
                 "name": node_name,
@@ -969,7 +942,6 @@ class CadToGlbConverter:
                 "children": children,
             }
 
-        # ---- 零件 ----
         mat_src = instance_label if instance_label else label
         mat_dict = read_material_from_label(self.color_tool, self.mat_tool, mat_src)
         if mat_dict is None and instance_label:
@@ -1001,7 +973,7 @@ class CadToGlbConverter:
             if "_merged_shape" in node:
                 merged = node.pop("_merged_shape")
                 ref_entry = node.pop("_ref_entry", "") or node.get("id", "")
-                node["assets"] = self._export_merged_gltf(
+                node["asset"] = self._export_merged_gltf(
                     merged,
                     display_name=node.get("name"),
                     cache_key=ref_entry,
@@ -1010,7 +982,7 @@ class CadToGlbConverter:
             elif "_label_ref" in node:
                 label = node.pop("_label_ref")
                 inst = node.pop("_instance_label", None)
-                node["assets"] = self._export_atomic_gltf_with_cache(
+                node["asset"] = self._export_atomic_gltf_with_cache(
                     label,
                     display_name=node.get("name"),
                     material_src_label=inst,
@@ -1038,7 +1010,7 @@ class CadToGlbConverter:
             nm = n.get("name", "")
             entry = n.get("id", "")
             mat_ids = n.get("_material_ids", [])
-            ast = n.get("assets", "")
+            ast = n.get("asset", "")
             children = n.get("children", [])
             node_type = n.get("type", "node")
             tfm = n.get("transform") or {
@@ -1063,7 +1035,7 @@ class CadToGlbConverter:
                 n["material"] = mat_ids
             n["transform"] = tfm
             if ast:
-                n["assets"] = ast
+                n["asset"] = ast
             n["children"] = children
 
         _fix(root)
