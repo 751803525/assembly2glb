@@ -80,7 +80,7 @@ export async function runPipeline(
       outputDir: path.join(tempDir, 'compress'),
     });
   }
-  console.info(TAG, '开始写入，准备写入到输出目录');
+  console.info(TAG, '准备写入到输出目录');
   await fileUtils.remove(outputDir);
   await fileUtils.copy(cacheDir, outputDir);
   if (!config.keepTemp) {
