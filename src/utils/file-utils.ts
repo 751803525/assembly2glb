@@ -76,7 +76,7 @@ export const fileUtils = {
     await fs.ensureDir(path.dirname(filePath));
     await fs.remove(filePath);
   },
-  writeFile: async function (filePath: string, data: any, space: number = 2): Promise<void> {
+  writeFile: async function (filePath: string, data: unknown, space: number = 2): Promise<void> {
     // 1. 确保目录存在
     await fs.ensureDir(path.dirname(filePath));
 
@@ -89,7 +89,7 @@ export const fileUtils = {
         .streamify(data, { space })
         .pipe(writeStream)
         .on('finish', () => resolve())
-        .on('error', (err: any) => reject(err));
+        .on('error', (err: never) => reject(err));
     });
   },
 
