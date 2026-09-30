@@ -5,7 +5,7 @@ import { merge_glb } from '@/scripts/index.js';
 
 const TAG = 'merge';
 /**
- * 费分析去重复
+ * 生成合并对象
  */
 export async function merge(
   config: PipelineConfig & {
@@ -18,7 +18,7 @@ export async function merge(
   // 2  合并glb
   await spawn(env, [merge_glb, inputPath, outputDir, fileName], {}, TAG);
   if (config.mode == 'all') {
-    fileUtils.copy(inputPath, outputDir);
+    await fileUtils.copy(inputPath, outputDir);
   }
   return config.outputDir;
 }

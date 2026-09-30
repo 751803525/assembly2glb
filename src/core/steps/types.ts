@@ -6,4 +6,5 @@ export interface PipelineConfig {
   precision: number;
   dedup: boolean;
   keepTemp: boolean;
+  compress: boolean;
 }

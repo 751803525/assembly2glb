@@ -8,8 +8,9 @@ interface ProcessOptions {
   simplify?: string | boolean;
   dedup?: boolean;
   precision?: string | boolean;
-  keepTemp?: boolean | boolean;
   merge?: boolean | 'merge' | 'all';
+  compress?: boolean;
+  keepTemp?: boolean | boolean;
 }
 
 export async function processCommand(options: ProcessOptions): Promise<void> {
@@ -92,6 +93,7 @@ export async function processCommand(options: ProcessOptions): Promise<void> {
   }
   const dedup = options.dedup == true;
 
+  const compress = options.compress || false;
   const keepTemp = options.keepTemp || false;
 
   // 6. 构建并执行流水线
@@ -101,8 +103,9 @@ export async function processCommand(options: ProcessOptions): Promise<void> {
     simplify,
     dedup,
     precision,
-    keepTemp,
     mode,
+    compress,
+    keepTemp,
   };
   const result = await runPipeline(config);
   if (result.code == 0) {

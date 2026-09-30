@@ -32,13 +32,19 @@ export const fileUtils = {
       errorOnExist?: boolean;
     }
   ): Promise<string> {
-    if (fs.statSync(from).isFile()) {
-      const dir = path.dirname(to);
-      await fileUtils.ensureDir(dir);
-      await fs.copyFile(from, to);
+    const stat = await fs.stat(from);
+    if (stat.isFile()) {
+      const filter = opt?.filter?.apply(null, [from, to]);
+      if (!filter) {
+        const dir = path.dirname(to);
+        await fileUtils.ensureDir(dir);
+        await fs.copyFile(from, to);
+      }
     } else {
-      await fileUtils.ensureDir(to);
-      await fs.copy(from, to, opt);
+      const result = await fs.readdir(from);
+      for (const item of result) {
+        await this.copy(path.join(from, item), path.join(to, item), opt);
+      }
     }
     return to;
   },
@@ -87,24 +93,103 @@ export const fileUtils = {
     });
   },
 
-  readdir: async function (dir: string, suffix?: string): Promise<string[]> {
+  readdir: async function (dir: string, ...suffixes: (string | string[])[]): Promise<string[]> {
     if (!this.exists(dir)) {
       return [] as string[];
     }
     if (!(await fs.stat(dir)).isDirectory()) {
       return [] as string[];
     }
-    let result = await fs.readdir(dir, { encoding: 'utf-8' });
-    if (suffix) {
-      const normalized = suffix.startsWith('.')
-        ? suffix.toLocaleLowerCase()
-        : '.' + suffix.toLocaleLowerCase();
 
-      result = result.filter((name) => {
-        const ext = path.extname(name).toLocaleLowerCase();
-        return ext === normalized;
+    const result: string[] = [];
+    const children = await fs.readdir(dir, { encoding: 'utf-8' });
+    for (const item of children) {
+      const child = path.join(dir, item);
+      const stat = await fs.stat(child);
+
+      if (stat.isDirectory()) {
+        const r = await this.readdir(child);
+        result.push(...r);
+      } else {
+        result.push(child);
+      }
+    }
+
+    // 拍平 + 归一化
+    const flat: Set<string> = new Set();
+    for (const s of suffixes) {
+      if (Array.isArray(s)) {
+        for (const x of s) {
+          if (x.startsWith('.')) {
+            flat.add(x.toLowerCase());
+          } else {
+            flat.add(`.${x.toLowerCase()}`);
+          }
+        }
+      } else if (s) {
+        if (s.startsWith('.')) {
+          flat.add(s.toLowerCase());
+        } else {
+          flat.add(`.${s.toLowerCase()}`);
+        }
+      }
+    }
+    if (flat.size > 0) {
+      return result.filter((item) => {
+        return flat.has(path.extname(item).toLocaleLowerCase());
       });
     }
-    return result.map((name) => path.join(dir, name));
+    return result;
+  },
+
+  readdirByFilter: async function (
+    dir: string,
+    ...suffixes: (string | string[])[]
+  ): Promise<string[]> {
+    if (!this.exists(dir)) {
+      return [] as string[];
+    }
+    if (!(await fs.stat(dir)).isDirectory()) {
+      return [] as string[];
+    }
+
+    const result: string[] = [];
+    const children = await fs.readdir(dir, { encoding: 'utf-8' });
+    for (const item of children) {
+      const child = path.join(dir, item);
+      const stat = await fs.stat(child);
+      if (stat.isDirectory()) {
+        const r = await this.readdir(child);
+        result.push(...r);
+      } else {
+        result.push(child);
+      }
+    }
+
+    // 拍平 + 归一化
+    const flat: Set<string> = new Set();
+    for (const s of suffixes) {
+      if (Array.isArray(s)) {
+        for (const x of s) {
+          if (x.startsWith('.')) {
+            flat.add(x.toLowerCase());
+          } else {
+            flat.add(`.${x.toLowerCase()}`);
+          }
+        }
+      } else if (s) {
+        if (s.startsWith('.')) {
+          flat.add(s.toLowerCase());
+        } else {
+          flat.add(`.${s.toLowerCase()}`);
+        }
+      }
+    }
+    if (flat.size > 0) {
+      return result.filter((item) => {
+        return !flat.has(path.extname(item).toLocaleLowerCase());
+      });
+    }
+    return result;
   },
 };

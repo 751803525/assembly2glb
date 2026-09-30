@@ -61,6 +61,5 @@ export async function convert(config: PipelineConfig & { env: string }): Promise
     {},
     TAG
   );
-
   return splitDir;
 }

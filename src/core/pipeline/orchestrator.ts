@@ -7,7 +7,8 @@ import { convert } from '@/core/steps/convert.js';
 import { dedupGlb } from '@/core/steps/dedup-glb.js';
 import { simplifyGlb } from '@/core/steps/simplify-glb.js';
 import { PipelineConfig } from '@/core/steps/types.js';
-import { merge } from '../steps/merge.js';
+import { merge } from '@/core/steps/merge.js';
+import { compressGlb } from '@/core/steps/compress-glb.js';
 
 const TAG = 'pipeline';
 
@@ -38,7 +39,7 @@ export async function runPipeline(
     return { code: 1, message: result.message };
   }
 
-  const { inputPath, outputDir, simplify, dedup, mode } = config;
+  const { inputPath, outputDir, simplify, dedup, mode, compress } = config;
 
   logger.info(TAG, `解析:${inputPath}`);
   let cacheDir = await convert({
@@ -65,13 +66,19 @@ export async function runPipeline(
     });
   }
   if (mode != 'split') {
-    logger.info(TAG, `开始合并`);
     cacheDir = await runStepAndCleanup('合并', merge, {
       ...config,
       inputPath: cacheDir,
       outputDir: path.join(tempDir, 'merge'),
       env: result.data,
       fileName: path.parse(inputPath).name,
+    });
+  }
+  if (compress) {
+    cacheDir = await runStepAndCleanup('压缩', compressGlb, {
+      ...config,
+      inputPath: cacheDir,
+      outputDir: path.join(tempDir, 'compress'),
     });
   }
   logger.info(TAG, '开始写入，准备写入到输出目录');

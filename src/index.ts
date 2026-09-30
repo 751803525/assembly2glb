@@ -12,6 +12,7 @@ program
   .option('-s, --simplify [number]', '执行减面操作')
   .option('-d, --dedup', '执行去重操作')
   .option('-m, --merge [string]', '模型合并输出')
+  .option('-c, --compress', '开启压缩')
   .option('--keep-temp', '保留临时文件（调试用）')
   .action(async (options) => {
     await processCommand(options);
