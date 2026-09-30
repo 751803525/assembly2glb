@@ -19,7 +19,10 @@ program
   .option('-p, --precision [number]', '导出模型精度')
   .option('-s, --simplify [number]', '执行减面操作')
   .option('-d, --dedup', '执行去重操作')
-  .option('-m, --merge [string]', '模型合并输出')
+  .option(
+    '-m, --mode [number]',
+    '模型输出模式 1: 离散化数据; 2:结构化GLB; 3:模式 1+2; 4: 拍平为单一体； 5: 模式 4 + 1; 6:模式 4 + 2; 7:模式 4 + 2 + 1;'
+  )
   .option('-c, --compress', '开启压缩')
   .option('--keep-temp', '保留临时文件（调试用）')
   .action(async (options) => {

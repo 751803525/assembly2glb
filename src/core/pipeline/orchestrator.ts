@@ -5,7 +5,7 @@ import { checkLocalEnvironment } from '@/core/steps/env-check.js';
 import { splitter } from '@/core/steps/splitter.js';
 import { dedupGlb } from '@/core/steps/dedup-glb.js';
 import { simplifyGlb } from '@/core/steps/simplify-glb.js';
-import { PipelineConfig } from '@/core/steps/types.js';
+import { MODE_SPLIT, PipelineConfig } from '@/core/steps/types.js';
 import { merge } from '@/core/steps/merge.js';
 import { compressGlb } from '@/core/steps/compress-glb.js';
 
@@ -64,7 +64,7 @@ export async function runPipeline(
       env: result.data,
     });
   }
-  if (mode != 'split') {
+  if (mode > MODE_SPLIT) {
     cacheDir = await runStepAndCleanup('合并', merge, {
       ...config,
       inputPath: cacheDir,

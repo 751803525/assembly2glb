@@ -1,6 +1,14 @@
 import inquirer from 'inquirer';
 import { runPipeline } from '@/core/pipeline/orchestrator.js';
-import { PipelineConfig } from '@/core/steps/types.js';
+import {
+  hasMode,
+  isValidMode,
+  MODE_FLATTEN,
+  MODE_MERGE,
+  MODE_SPLIT,
+  OutputMode,
+  PipelineConfig,
+} from '@/core/steps/types.js';
 
 interface ProcessOptions {
   input?: string;
@@ -8,7 +16,7 @@ interface ProcessOptions {
   simplify?: string | boolean;
   dedup?: boolean;
   precision?: string | boolean;
-  merge?: boolean | 'merge' | 'all';
+  mode?: boolean | number;
   compress?: boolean;
   keepTemp?: boolean | boolean;
 }
@@ -71,24 +79,32 @@ export async function processCommand(options: ProcessOptions): Promise<void> {
     }
   }
 
-  // 3. 减面参数
-  let mode: PipelineConfig['mode'] = 'split'; // 默认
-  if (options.merge) {
-    if (typeof options.merge === 'string') {
-      mode = options.merge; // 命令行传入
+  // 3. 输出模式参数
+  let mode: PipelineConfig['mode'] = MODE_SPLIT; // 默认
+  if (options.mode) {
+    if (typeof options.mode === 'string') {
+      const inputMode = parseInt(options.mode);
+      mode = isValidMode(inputMode) ? inputMode : MODE_SPLIT; // 命令行传入
     } else {
-      const answer = await inquirer.prompt({
-        type: 'list',
-        name: 'mode',
-        message: '请选择执行步骤:',
+      const answer = await inquirer.prompt<{ modes: number[] }>({
+        type: 'checkbox',
+        name: 'modes',
+        message: '请选择输出内容（可多选，空格切换，回车确认）:',
         choices: [
-          { name: '仅拆分', value: 'split' },
-          { name: '仅合并', value: 'merge' },
-          { name: '全部（拆分 + 合并）', value: 'all' },
+          { name: '离散化（结构树 + 分件 gltf）', value: MODE_SPLIT, checked: true },
+          { name: '合并（分层装配 glb）', value: MODE_MERGE },
+          { name: '单体（烘焙为不可拆单体 glb）', value: MODE_FLATTEN },
         ],
-        default: 'split',
+        validate: (choices) => {
+          const anyChecked = (choices as { name: string; value: number; checked?: boolean }[]).some(
+            (c) => c.checked
+          );
+          return anyChecked || '至少选择一项';
+        },
       });
-      mode = answer.mode;
+
+      // 把选中的位 OR 起来
+      mode = answer.modes.reduce((acc, v) => acc | v, 0) as OutputMode;
     }
   }
   const dedup = options.dedup == true;
