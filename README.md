@@ -158,17 +158,17 @@ assembly2glb process \
 {
   "id": "0:1:1:1",
   "name": "SH1_904_403891210001_ASM",
-  "type": "assembly",
+  "type": "node",
   "transform": {
     "position": [0.0, 0.0, 0.0],
     "quaternion": [0.0, 0.0, 0.0, 1.0],
-    "scale": [1.0, 1.0, 1.0]
+    "scale": 1.0,
   },
   "children": [
     {
       "id": "0:1:1:1:1",
       "name": "114040型材1190001110104-0105",
-      "type": "part",
+      "type": "mesh",
       "transform": {},
       "children": [],
       "asset": "glbs/114040型材1190001110104-0105__9a957632.glb"
@@ -182,19 +182,19 @@ assembly2glb process \
 |---|---|
 | `id` | OCC 内部 label entry，全局唯一 |
 | `name` | 零件名（STEP 里 PRODUCT 的名称；无名字时退化为 `{父名}_{index}`） |
-| `type` | `assembly` 或 `part` |
+| `type` | `node` 或 `mesh` |
 | `transform` | 相对父节点的 TRS 变换（已换算到米） |
-| `children` | 子节点（`part` 类型的 `children` 恒为空） |
-| `asset` | 零件 GLB 的相对路径（`assembly` 类型为 `null`） |
+| `children` | 子节点 |
+| `asset` | 零件 GLB 的相对路径（`node` 类型为 `null`） |
 
 前端加载建议：
 
 ```typescript
 const tree = await fetch('assembly-tree.json').then(r => r.json());
 
-// 每个 part 节点的 asset 是相对路径，可以据此加载对应的 GLB
+// 每个 node 节点的 asset 是相对路径，可以据此加载对应的 GLB
 function collectAssets(node: any): string[] {
-  if (node.type === 'part' && node.asset) return [node.asset];
+  if (node.type === 'node' && node.asset) return [node.asset];
   return (node.children ?? []).flatMap(collectAssets);
 }
 ```
@@ -269,16 +269,16 @@ conda config --set channel_priority strict
 
 ### Q6. 支持 IGES / BREP 吗？
 
-当前只支持 STEP。IGES、BREP 在 OCC 层面也能读（`IGESCAFControl_Reader` / `BRepTools`），后续会陆续支持。
+当前只支持 STEP,GLB。IGES、BREP 在 OCC 层面也能读（`IGESCAFControl_Reader` / `BRepTools`），后续会陆续支持。
 
 ---
 
 ## 已知限制
 
-- 仅支持 STEP：IGES / BREP 尚未接入
+- 支持 STEP、GLB：IGES / BREP 尚未接入
 - 材质/颜色：STEP 里有材质会被读取，但很多 CAD 导出时会覆盖成单一材质
 - 无 UV：当前不导出纹理坐标（工业 CAD 一般也不需要）
-- 无 Draco 压缩：如果需要更小的文件，可用 [gltfpack](https://github.com/zeux/meshoptimizer#gltfpack) 后处理
+- Draco 压缩：如果需要更小的文件，可用 [gltfpack](https://github.com/zeux/meshoptimizer#gltfpack) 后处理
 
 ---
 
