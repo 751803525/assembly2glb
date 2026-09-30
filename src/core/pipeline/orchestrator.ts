@@ -82,13 +82,13 @@ export async function runPipeline(
     });
   }
   logger.info(TAG, '开始写入，准备写入到输出目录');
-  await fileUtils.prepareEmptyDir(outputDir);
+  await fileUtils.remove(outputDir);
   await fileUtils.copy(cacheDir, outputDir);
   if (!config.keepTemp) {
-    await fileUtils.remove(cacheDir);
+    await fileUtils.prepareEmptyDir(tempDir);
   }
 
-  logger.info(TAG, `操作完成，输出目录:${outputDir}`);
+  logger.info(TAG, `操作完成，输出目录:${path.resolve(outputDir)}`);
   return {
     code: 0,
     message: 'ok',
