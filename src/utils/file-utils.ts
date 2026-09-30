@@ -1,7 +1,6 @@
 import fs from 'fs-extra';
 import path from 'node:path';
 import bfj from 'bfj';
-import { logger } from '@/utils/logger.js';
 
 export const fileUtils = {
   exists: async function (filePath: string): Promise<boolean> {
@@ -16,11 +15,11 @@ export const fileUtils = {
   },
   remove: async function (dir: string): Promise<void> {
     if (await fileUtils.exists(dir)) {
-      logger.info('清理目录', `开始清理临时目录: ${dir}`);
+      console.info('清理目录', `开始清理临时目录: ${dir}`);
       await fs.remove(dir);
-      logger.info('清理目录', `清理临时目录完成: ${dir}`);
+      console.info('清理目录', `清理临时目录完成: ${dir}`);
     } else {
-      logger.info('清理目录', `${dir} 目录不存在跳过清理！`);
+      console.info('清理目录', `${dir} 目录不存在跳过清理！`);
     }
   },
   copy: async function (

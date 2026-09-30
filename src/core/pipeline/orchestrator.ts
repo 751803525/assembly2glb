@@ -1,9 +1,8 @@
-import { logger } from '@/utils/logger.js';
 import { fileUtils } from '@/utils/file-utils.js';
 import { tempDir } from '@/utils/temp-path.js';
 import path from 'path';
 import { checkLocalEnvironment } from '@/core/steps/env-check.js';
-import { convert } from '@/core/steps/convert.js';
+import { splitter } from '@/core/steps/splitter.js';
 import { dedupGlb } from '@/core/steps/dedup-glb.js';
 import { simplifyGlb } from '@/core/steps/simplify-glb.js';
 import { PipelineConfig } from '@/core/steps/types.js';
@@ -17,14 +16,14 @@ async function runStepAndCleanup<T extends PipelineConfig>(
   stepFn: (config: T) => Promise<string>,
   config: T
 ): Promise<string> {
-  logger.info(TAG, `开始${label}`);
+  console.info(TAG, `开始${label}`);
   const out = await stepFn(config);
-  logger.info(TAG, `${label}完成`);
+  console.info(TAG, `${label}完成`);
   if (!config.keepTemp) {
     try {
       await fileUtils.remove(config.inputPath);
     } catch (e) {
-      logger.warn(TAG, `清理${label}输入目录失败: ${e}`);
+      console.warn(TAG, `清理${label}输入目录失败: ${e}`);
     }
   }
   return out;
@@ -35,20 +34,20 @@ export async function runPipeline(
 ): Promise<{ code: number; message?: string }> {
   const result = await checkLocalEnvironment();
   if (!result.success) {
-    logger.error(TAG, result.message);
+    console.error(TAG, result.message);
     return { code: 1, message: result.message };
   }
 
   const { inputPath, outputDir, simplify, dedup, mode, compress } = config;
 
-  logger.info(TAG, `解析:${inputPath}`);
-  let cacheDir = await convert({
+  console.info(TAG, `解析:${inputPath}`);
+  let cacheDir = await splitter({
     ...config,
     env: result.data,
     outputDir: path.join(tempDir, 'convert'),
   });
 
-  logger.info(TAG, `解析完成`);
+  console.info(TAG, `解析完成`);
   // 开始减面
   if (simplify > 0 && simplify < 100) {
     cacheDir = await runStepAndCleanup('减面', simplifyGlb, {
@@ -81,14 +80,14 @@ export async function runPipeline(
       outputDir: path.join(tempDir, 'compress'),
     });
   }
-  logger.info(TAG, '开始写入，准备写入到输出目录');
+  console.info(TAG, '开始写入，准备写入到输出目录');
   await fileUtils.remove(outputDir);
   await fileUtils.copy(cacheDir, outputDir);
   if (!config.keepTemp) {
     await fileUtils.prepareEmptyDir(tempDir);
   }
 
-  logger.info(TAG, `操作完成，输出目录:${path.resolve(outputDir)}`);
+  console.info(TAG, `操作完成，输出目录:${path.resolve(outputDir)}`);
   return {
     code: 0,
     message: 'ok',

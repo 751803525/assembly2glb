@@ -2,8 +2,6 @@ import path from 'path';
 import { NodeIO } from '@gltf-transform/core';
 import { weld, simplify } from '@gltf-transform/functions';
 import { MeshoptSimplifier, MeshoptDecoder } from 'meshoptimizer';
-
-import { logger } from '@/utils/logger.js';
 import { PipelineConfig } from './types.js';
 import { fileUtils } from '@/utils/file-utils.js';
 
@@ -64,7 +62,7 @@ async function simplifyKeepEdges(
   // 3. 写出 .gltf（gltf-transform 会自动生成同名 .bin）
   await io.write(outputGltf, doc);
 
-  logger.info(
+  console.info(
     TAG,
     `[${path.basename(inputGltf)}] 简化完成: 三角面数 ${originalFaces} -> ${simplifiedFaces} (${((simplifiedFaces / (originalFaces || 1)) * 100).toFixed(1)}%)`
   );
@@ -85,7 +83,7 @@ export async function simplifyGlb(
   config: PipelineConfig & { inputPath: string; outputDir: string }
 ): Promise<string> {
   const { simplify, inputPath, outputDir } = config;
-  logger.info(TAG, `开始网格二次简化与拓扑重构`);
+  console.info(TAG, `开始网格二次简化与拓扑重构`);
 
   const meshsIn = path.join(inputPath, 'meshs');
   const meshsOut = path.join(outputDir, 'meshs');
@@ -103,7 +101,7 @@ export async function simplifyGlb(
         lockBorder: true,
       });
     } catch (error) {
-      logger.error(TAG, `处理文件失败 [${item}]:`, error);
+      console.error(TAG, `处理文件失败 [${item}]:`, error);
     }
   }
 
@@ -114,6 +112,6 @@ export async function simplifyGlb(
     await fileUtils.copy(item, path.join(outputDir, name));
   }
 
-  logger.info(TAG, `全部网格减面完成！`);
+  console.info(TAG, `全部网格减面完成！`);
   return outputDir;
 }

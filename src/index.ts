@@ -2,7 +2,15 @@
 
 import { program } from 'commander';
 import { processCommand } from '@/cli/commands/process.js';
+import { configureLogger, patchConsole, flushLogger } from '@/utils/console-patch.js';
+import path from 'path';
 
+// 1) 先配置（可选文件输出）
+configureLogger({
+  enabled: false,
+  filePath: path.resolve(import.meta.dirname, '../logs', 'app.log'),
+});
+patchConsole();
 program
   .command('process')
   .description('工业CAD轻量化流水线（默认仅执行解析，通过 -s 添加更多步骤）')
@@ -22,3 +30,7 @@ if (process.argv.length <= 2) {
   program.help(); // 内部会 process.exit(0)
 }
 program.parse();
+process.on('SIGINT', async () => {
+  await flushLogger();
+  process.exit(0);
+});

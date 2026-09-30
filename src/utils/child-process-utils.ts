@@ -1,4 +1,3 @@
-import { logger } from '@/utils/logger.js';
 import { ChildProcess, spawn as spawnImpl, exec as execImpl, SpawnOptions } from 'child_process';
 import { ExecException, ExecOptionsWithBufferEncoding } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
@@ -17,7 +16,7 @@ const spawn = (
   const realArgs = fliterUndefined(args);
   if (logTag) {
     const append = realArgs ? ' ' + realArgs.join(' ') : '';
-    logger.info(logTag, `执行：${command.trim()} ${append}`);
+    console.info(logTag, `执行：${command.trim()} ${append}`);
   }
 
   return new Promise((resolve, reject) => {
@@ -44,7 +43,7 @@ const spawn = (
           .split('\n')
           .forEach((l) => {
             if (l.trim()) {
-              logger.info(logTag, l);
+              console.info(logTag, l);
             }
           });
       });
@@ -55,7 +54,7 @@ const spawn = (
           .split('\n')
           .forEach((l) => {
             if (l.trim()) {
-              logger.info(logTag, l);
+              console.info(logTag, l);
             }
           });
       });
@@ -72,8 +71,8 @@ const spawn = (
     });
     child.on('error', (err) => {
       if (logTag) {
-        logger.error(logTag, `无法启动 ${command} 进程，请检查路径是否存在。`);
-        logger.error(logTag, err);
+        console.error(logTag, `无法启动 ${command} 进程，请检查路径是否存在。`);
+        console.error(logTag, err);
       }
       reject(err);
     });
@@ -89,7 +88,7 @@ const exec = (
     return iconv.decode(Buffer.from(data), process.platform == 'win32' ? 'gbk' : 'utf-8').trim();
   };
   if (logTag) {
-    logger.info(logTag, `执行：${command}`);
+    console.info(logTag, `执行：${command}`);
   }
   return new Promise<{ code: number; message: string }>((resolve, reject) => {
     execImpl(
@@ -102,10 +101,10 @@ const exec = (
         const result = safeDecode(stdout);
 
         if (result && result.length && logTag) {
-          logger.info(logTag, result);
+          console.info(logTag, result);
         }
         if (stderr && stderr.length && logTag) {
-          logger.error(logTag, safeDecode(stderr));
+          console.error(logTag, safeDecode(stderr));
         }
 
         if (error) {

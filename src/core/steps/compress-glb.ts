@@ -7,7 +7,6 @@ import draco3d from 'draco3dgltf';
 
 import { PipelineConfig } from './types.js';
 import { fileUtils } from '@/utils/file-utils.js';
-import { logger } from '@/utils/logger.js';
 
 const TAG = 'compress';
 
@@ -89,10 +88,10 @@ export async function compressGlb(
   // ---- 2. 遍历所有 glb/gltf 并压缩 ----
   const targets = await fileUtils.readdir(inputPath, '.glb', '.gltf');
   if (targets.length === 0) {
-    logger.info(TAG, `未找到 glb/gltf 文件，跳过压缩`);
+    console.info(TAG, `未找到 glb/gltf 文件，跳过压缩`);
     return outputDir;
   }
-  logger.info(TAG, `待压缩文件数: ${targets.length}`);
+  console.info(TAG, `待压缩文件数: ${targets.length}`);
   let successCount = 0;
   const allList: Promise<boolean>[] = [];
   // --- 构建 压缩的异步 Promise
@@ -107,9 +106,9 @@ export async function compressGlb(
       successCount++;
     }
   });
-  logger.info(TAG, `成功压缩: ${successCount}/${targets.length}`);
+  console.info(TAG, `成功压缩: ${successCount}/${targets.length}`);
   if (successCount != targets.length) {
-    logger.info(TAG, '压缩失败的将输出原始模型');
+    console.info(TAG, '压缩失败的将输出原始模型');
   }
   return outputDir;
 }

@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { exec, spawn } from '@/utils/child-process-utils.js';
-import { logger } from '@/utils/logger.js';
 import { verify_occ } from '@/scripts/index.js';
 
 const TAG = 'env-check';
@@ -65,13 +64,13 @@ const verifyOccRuntime = async (pythonPath: string): Promise<boolean> => {
 
 /** 检查 Conda 工具是否可用，返回其 base 目录 */
 const checkConda = async (): Promise<EnvCheckResult | EnvCheckError> => {
-  logger.info(TAG, '正在检测 Conda 工具');
+  console.info(TAG, '正在检测 Conda 工具');
   try {
     const versionResult = await exec('conda --version', {}, TAG);
     const baseResult = await exec('conda info --base', {}, TAG);
     const condaBaseDir = baseResult.message.trim().replace(/\r/g, '');
 
-    logger.info(
+    console.info(
       TAG,
       `检测到 Conda 工具; version: ${versionResult.message.trim()} dir: ${condaBaseDir}`
     );
@@ -87,17 +86,17 @@ const checkConda = async (): Promise<EnvCheckResult | EnvCheckError> => {
 /** 删除 cad_env（不存在时静默忽略） */
 const removeCadEnv = async (): Promise<void> => {
   try {
-    logger.info(TAG, `正在删除旧的 [${CAD_ENV_NAME}] 环境...`);
+    console.info(TAG, `正在删除旧的 [${CAD_ENV_NAME}] 环境...`);
     await spawn('conda', ['env', 'remove', '-n', CAD_ENV_NAME, '-y'], {}, TAG);
-    logger.info(TAG, `[${CAD_ENV_NAME}] 环境已删除`);
+    console.info(TAG, `[${CAD_ENV_NAME}] 环境已删除`);
   } catch {
-    logger.info(TAG, `[${CAD_ENV_NAME}] 环境不存在或删除失败，跳过`);
+    console.info(TAG, `[${CAD_ENV_NAME}] 环境不存在或删除失败，跳过`);
   }
 };
 
 /** 创建 cad_env（锁定 Python 版本） */
 const createCadEnv = async (): Promise<void> => {
-  logger.info(TAG, `正在创建 [${CAD_ENV_NAME}] 环境 (python=${PYTHON_VERSION}) ...`);
+  console.info(TAG, `正在创建 [${CAD_ENV_NAME}] 环境 (python=${PYTHON_VERSION}) ...`);
   await spawn(
     'conda',
     ['create', '-n', CAD_ENV_NAME, '-c', CONDA_CHANNEL, `python=${PYTHON_VERSION}`, '-y'],
@@ -108,7 +107,7 @@ const createCadEnv = async (): Promise<void> => {
 
 /** 安装锁定的 pythonocc-core */
 const installPythonocc = async (): Promise<void> => {
-  logger.info(TAG, `正在安装 pythonocc-core=${PYTHONOCC_VERSION} (channel=${CONDA_CHANNEL}) ...`);
+  console.info(TAG, `正在安装 pythonocc-core=${PYTHONOCC_VERSION} (channel=${CONDA_CHANNEL}) ...`);
   await spawn(
     'conda',
     [
@@ -167,7 +166,7 @@ const checkExistingEnv = async (condaBaseDir: string): Promise<EnvCheckResult | 
     };
   }
 
-  logger.info(
+  console.info(
     TAG,
     `检测到 [${CAD_ENV_NAME}] 环境：python=${actualPyVer}，OCC=${PYTHONOCC_VERSION}`
   );
@@ -219,7 +218,7 @@ const buildCadEnvFromScratch = async (
     };
   }
 
-  logger.info(TAG, `[${CAD_ENV_NAME}] 环境构建完成并验证通过！`);
+  console.info(TAG, `[${CAD_ENV_NAME}] 环境构建完成并验证通过！`);
   return { success: true, data: pythonPath };
 };
 
@@ -250,6 +249,6 @@ export const checkLocalEnvironment = async (): Promise<EnvCheckResult | EnvCheck
   }
 
   // 3. 不满足要求 → 推倒重建
-  logger.warn(TAG, `${existing.message}，开始重建 [${CAD_ENV_NAME}] 环境...`);
+  console.warn(TAG, `${existing.message}，开始重建 [${CAD_ENV_NAME}] 环境...`);
   return await buildCadEnvFromScratch(condaBaseDir);
 };
