@@ -26,14 +26,14 @@ export const fileUtils = {
     from: string,
     to: string,
     opt?: {
-      filter?: (from: string, to: string) => boolean;
+      skip?: (from: string, to: string) => boolean;
       overwrite?: boolean;
       errorOnExist?: boolean;
     }
   ): Promise<string> {
     const stat = await fs.stat(from);
     if (stat.isFile()) {
-      const filter = opt?.filter?.apply(null, [from, to]);
+      const filter = opt?.skip?.apply(null, [from, to]);
       if (!filter) {
         const dir = path.dirname(to);
         await fileUtils.ensureDir(dir);

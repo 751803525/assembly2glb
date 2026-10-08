@@ -222,7 +222,12 @@ class CadToGlbConverter:
         s = re.sub(r'[\\/:*?"<>|\r\n\t]', "_", name)
         s = "".join(c for c in s if c.isprintable())
         s = re.sub(r"_+", "_", s)
-        return s.strip(" ._")
+        # 剥掉两端 ASCII 符号 + 空格
+        # 保留 0-9 A-Z a-z ( ) [ ] { } 和所有非 ASCII（中文、中文标点等）
+        _strip = r"!-'*-/:-?@\\^_`|~ "
+        s = re.sub(r"^[" + _strip + r"]+", "", s)
+        s = re.sub(r"[" + _strip + r"]+$", "", s)
+        return s
 
     def _decompose_trsf(self, trsf: gp_Trsf) -> Tuple[List[float], List[float], float]:
         t = trsf.TranslationPart()
@@ -788,12 +793,13 @@ class CadToGlbConverter:
             json.dump(gltf_dict, fj, separators=(",", ":"))
 
     # ---------------- 单零件 / 多 body 导出 ----------------
-
     def _export_atomic_gltf_with_cache(
         self,
         label: TDF_Label,
         mat_ids: Optional[List[str]] = None,
+        entity: str = "",
     ) -> str:
+        # cache key 仍用 referred_label 的 entry，保证同一几何只导一次
         label_entry = self._get_label_entry_str(label)
         if label_entry in self.asset_cache:
             return self.asset_cache[label_entry]
@@ -802,10 +808,12 @@ class CadToGlbConverter:
         if mat_ids:
             mat_dict = self.materials_table.get(mat_ids[0])
 
-        safe_filename = label_entry.replace(":", "_") + ".gltf"
+        # 临时文件名 / glTF 内部名 都用 instance entity，与最终名后缀保持同一维度
+        file_key = entity if entity else label_entry
+        safe_filename = file_key.replace(":", "_") + ".gltf"
         gltf_path = os.path.join(self.meshs_dir, safe_filename)
 
-        self._export_gltf([(label, mat_dict)], gltf_path, output_name=label_entry)
+        self._export_gltf([(label, mat_dict)], gltf_path, output_name=file_key)
 
         log(f"[mesh] {safe_filename}")
         rel = f"{MESHS_SUBDIR}/{safe_filename}"
@@ -982,9 +990,11 @@ class CadToGlbConverter:
                 label = node.pop("_label_ref")
                 node.pop("_instance_label", None)
                 mat_ids = node.get("_material_ids", [])
+                entity = node.get("_entity", "")
                 node["asset"] = self._export_atomic_gltf_with_cache(
                     label,
                     mat_ids=mat_ids,
+                    entity=entity,
                 )
         else:
             node.pop("_instance_label", None)
@@ -1011,10 +1021,10 @@ class CadToGlbConverter:
             if draft:
                 next_meaningful = draft
             else:
-                draft = f"{parent_meaningful}_{entity_safe}"
+                draft = f"{parent_meaningful}__{entity_safe}"
                 next_meaningful = parent_meaningful
         else:
-            draft = f"{parent_meaningful}_{entity_safe}"
+            draft = f"{parent_meaningful}__{entity_safe}"
             next_meaningful = parent_meaningful
 
         n["_final_name"] = draft

@@ -49,11 +49,20 @@ async function fileSizeWithBin(filePath: string): Promise<number> {
   return total;
 }
 
+/** 删除 gltf + 同名 bin（glb / 其他文件只删自身） */
+async function removeWithBin(filePath: string): Promise<void> {
+  await fs.rm(filePath, { force: true });
+  if (path.extname(filePath).toLowerCase() === '.gltf') {
+    await fs.rm(filePath.replace(/gltf$/i, 'bin'), { force: true });
+  }
+}
+
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
+
 // ---------------------------------------------------------------------
 // 单文件压缩
 // ---------------------------------------------------------------------
@@ -78,7 +87,26 @@ async function compressOne(inputFile: string, outputFile: string): Promise<boole
     // ---- 压缩前后大小对比 ----
     const inSize = await fileSizeWithBin(inputFile);
     const outSize = await fileSizeWithBin(outputFile);
-    const ratio = inSize > 0 ? ((outSize / inSize) * 100).toFixed(1) : '--';
+
+    // 压缩后反而变大（极小文件常见：Draco 头部开销 > 几何省下的空间）
+    // → 丢弃压缩产物，使用原始文件
+    if (outSize >= inSize) {
+      await removeWithBin(outputFile);
+      await fileUtils.copy(inputFile, outputFile);
+      if (path.extname(inputFile).toLowerCase() === '.gltf') {
+        await fileUtils.copy(
+          inputFile.replace(/gltf$/i, 'bin'),
+          outputFile.replace(/gltf$/i, 'bin')
+        );
+      }
+      console.info(
+        TAG,
+        `${path.basename(inputFile)}: ${formatSize(inSize)} → 压缩后变大，使用原始文件`
+      );
+      return true;
+    }
+
+    const ratio = ((outSize / inSize) * 100).toFixed(1);
     console.info(
       TAG,
       `${path.basename(inputFile)}: ${formatSize(inSize)} → ${formatSize(outSize)} (${ratio}%)`
@@ -90,13 +118,14 @@ async function compressOne(inputFile: string, outputFile: string): Promise<boole
       TAG,
       `压缩失败，回退原始文件: ${path.basename(inputFile)} — ${(err as Error).message}`
     );
-    fileUtils.copy(inputFile, outputFile);
-    if (path.extname(inputFile).toLocaleLowerCase() == '.gltf') {
-      fileUtils.copy(inputFile.replace(/gltf$/, 'bin'), outputFile.replace(/gltf$/, 'bin'));
+    await fileUtils.copy(inputFile, outputFile);
+    if (path.extname(inputFile).toLowerCase() === '.gltf') {
+      await fileUtils.copy(inputFile.replace(/gltf$/i, 'bin'), outputFile.replace(/gltf$/i, 'bin'));
     }
     return false;
   }
 }
+
 /**
  * Draco 压缩
  *
@@ -105,7 +134,7 @@ async function compressOne(inputFile: string, outputFile: string): Promise<boole
  *   - mode=all 时还有 assembly-tree.json + meshs/*.gltf + .bin + tex_*.png
  *
  * 输出：<outputDir>/ 保持目录结构
- *   - .glb / .gltf 被 Draco 压缩
+ *   - .glb / .gltf 被 Draco 压缩（若压缩后反而变大，改用原始文件）
  *   - 其它文件（tree json、贴图等）原样复制
  *   - 原 .bin 不复制（每个 gltf 被 draco 重写后会生成新 bin）
  */
@@ -119,7 +148,7 @@ export async function compressGlb(
   await fileUtils.prepareEmptyDir(outputDir);
   // ---- 1. 先把所有非 glb/gltf 文件复制过去（保留目录结构） ----
   await fileUtils.copy(inputPath, outputDir, {
-    filter: (from: string, _to: string) => {
+    skip: (from: string, _to: string) => {
       const extname = path.extname(from).toLocaleLowerCase();
       return extname == '.glb' || extname == '.gltf' || extname == '.bin';
     },
