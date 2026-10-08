@@ -28,6 +28,32 @@ async function getIO(): Promise<NodeIO> {
   }
   return _ioPromise;
 }
+
+/** 计算 gltf + 同名 bin 的总字节数（glb / 其他文件只算自身） */
+async function fileSizeWithBin(filePath: string): Promise<number> {
+  let total = 0;
+  try {
+    total += (await fs.stat(filePath)).size;
+  } catch {
+    /* 文件不存在，忽略 */
+  }
+
+  if (path.extname(filePath).toLowerCase() === '.gltf') {
+    const binPath = filePath.replace(/gltf$/, 'bin');
+    try {
+      total += (await fs.stat(binPath)).size;
+    } catch {
+      /* 无 bin，忽略 */
+    }
+  }
+  return total;
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
 // ---------------------------------------------------------------------
 // 单文件压缩
 // ---------------------------------------------------------------------
@@ -48,16 +74,29 @@ async function compressOne(inputFile: string, outputFile: string): Promise<boole
 
     await fs.mkdir(path.dirname(outputFile), { recursive: true });
     await io.write(outputFile, document);
+
+    // ---- 压缩前后大小对比 ----
+    const inSize = await fileSizeWithBin(inputFile);
+    const outSize = await fileSizeWithBin(outputFile);
+    const ratio = inSize > 0 ? ((outSize / inSize) * 100).toFixed(1) : '--';
+    console.info(
+      TAG,
+      `${path.basename(inputFile)}: ${formatSize(inSize)} → ${formatSize(outSize)} (${ratio}%)`
+    );
+
     return true;
-  } catch {
+  } catch (err) {
+    console.warn(
+      TAG,
+      `压缩失败，回退原始文件: ${path.basename(inputFile)} — ${(err as Error).message}`
+    );
     fileUtils.copy(inputFile, outputFile);
-    if (path.extname(inputFile) == '.gltf') {
+    if (path.extname(inputFile).toLocaleLowerCase() == '.gltf') {
       fileUtils.copy(inputFile.replace(/gltf$/, 'bin'), outputFile.replace(/gltf$/, 'bin'));
     }
     return false;
   }
 }
-
 /**
  * Draco 压缩
  *

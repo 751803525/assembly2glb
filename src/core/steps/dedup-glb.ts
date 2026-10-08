@@ -4,7 +4,7 @@ import { spawn } from '@/utils/child-process-utils.js';
 import { dedup } from '@/scripts/index.js';
 const TAG = 'dedup';
 /**
- * 费分析去重复
+ * 分析去重复
  */
 export async function dedupGlb(config: PipelineConfig & { env: string }): Promise<string> {
   const { inputPath, outputDir, env } = config;

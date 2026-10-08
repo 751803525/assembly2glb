@@ -56,7 +56,7 @@ export async function splitter(config: PipelineConfig & { env: string }): Promis
 
   await spawn(
     env,
-    [splitter, encodingPath, path.join(splitDir, 'assembly-tree.json'), precision.toString()],
+    [splitter, encodingPath, path.join(splitDir, 'assembly-tree.json'), precision?.toString()],
     {},
     TAG
   );

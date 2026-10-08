@@ -6,7 +6,7 @@
  *   - 清空所有材质 / 贴图 / 图像
  *   - 剔除 TANGENT / TEXCOORD_* / COLOR_* / JOINTS / WEIGHTS 等纯视觉属性
  *   - 只保留 POSITION + NORMAL
- *   - 清 name / extras / generator
+ *   - 清 scene.name / extras / generator；node.name 和 mesh.name 用输入文件名
  *   - 合并为 1 个 node + 1 个 mesh + 1 个 primitive
  *
  * 关键顺序：先统一材质和属性，再 join()。
@@ -16,6 +16,7 @@
  * 真要看细节请走 MERGE / SPLIT 模式，或显式关闭下面的开关。
  */
 
+import path from 'path';
 import { NodeIO, Document, Node } from '@gltf-transform/core';
 import { KHRDracoMeshCompression } from '@gltf-transform/extensions';
 import { flatten, join } from '@gltf-transform/functions';
@@ -117,29 +118,37 @@ export function stripVisualAttributes(document: Document): number {
 }
 
 // =====================================================================
-// 匿名化
+// 匿名化 / 命名
 // =====================================================================
 
 /**
- * 清掉所有可能暴露来源的元数据：
- *   - scene / node / mesh 的 name
- *   - 所有对象的 extras（空对象，writer 不会序列化）
- *   - asset.generator
+ * 清掉所有可能暴露来源的元数据，同时给唯一的 node / mesh 命名。
+ *
+ *   - scene.name → ''
+ *   - node.name  → displayName（无 displayName 时为空串）
+ *   - mesh.name  → displayName
+ *   - material.name → ''（若还有材质残留）
+ *   - 所有对象的 extras 清空
+ *   - asset.generator → ''
+ *
+ * displayName 一般取"输入文件名（去掉扩展名）"，
+ * 这样加载到渲染器后节点名 / mesh 名与源文件一致，方便反查。
  */
-export function anonymize(document: Document): void {
+export function anonymize(document: Document, displayName?: string): void {
   const root = document.getRoot();
   const empty: Record<string, unknown> = {};
+  const name = displayName ?? '';
 
   for (const scene of root.listScenes()) {
     scene.setName('');
     scene.setExtras(empty);
   }
   for (const node of root.listNodes()) {
-    node.setName('');
+    node.setName(name);
     node.setExtras(empty);
   }
   for (const mesh of root.listMeshes()) {
-    mesh.setName('');
+    mesh.setName(name);
     mesh.setExtras(empty);
   }
   for (const mat of root.listMaterials()) {
@@ -226,10 +235,15 @@ export interface FlattenOptions {
    * 默认 true（"能看就好"）。
    */
   stripVisualAttributes?: boolean;
+  /**
+   * 输出 node / mesh 的名字。
+   * 默认从 inputGlbPath 取（去扩展名）。显式提供则覆盖。
+   */
+  displayName?: string;
 }
 
 /**
- * 把分层 glb 拍平成"给外部看的单体匿名 glb"。
+ * 把分层 glb 拍平成"给外部看的单体 glb"。
  *
  * 流程（顺序很关键）：
  *   1. 读入 inputGlbPath
@@ -238,7 +252,8 @@ export interface FlattenOptions {
  *   4. stripMaterials()   —— 清空材质（先于 join）
  *   5. join()             —— 此时所有图元属性/材质一致，可彻底合并
  *   6. collapseToSingleNode()  —— 兜底保证 1 node
- *   7. anonymize()        —— 清 name / extras / generator
+ *   7. anonymize()        —— 清 scene.name / extras / generator；
+ *                             node.name / mesh.name 用 displayName
  *   8. 写出 outputGlbPath
  */
 export async function flattenGlbFile(
@@ -277,8 +292,11 @@ export async function flattenGlbFile(
   // ---- 4. 单节点归并（兜底） ----
   collapseToSingleNode(document);
 
-  // ---- 5. 匿名化 ----
-  anonymize(document);
+  // ---- 5. 命名：scene 匿名，node / mesh 用 displayName ----
+  // 默认从 input 文件名取（通常是无流程后缀的源文件）。
+  // 如需自定义（比如去掉 _flatten 之类的中间后缀），调用方通过 options.displayName 覆盖。
+  const displayName = options.displayName ?? path.parse(inputGlbPath).name;
+  anonymize(document, displayName);
 
   // ---- 6. 写文件 ----
   await io.write(outputGlbPath, document);

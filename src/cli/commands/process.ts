@@ -1,7 +1,6 @@
 import inquirer from 'inquirer';
 import { runPipeline } from '@/core/pipeline/orchestrator.js';
 import {
-  hasMode,
   isValidMode,
   MODE_FLATTEN,
   MODE_MERGE,
@@ -47,7 +46,7 @@ export async function processCommand(options: ProcessOptions): Promise<void> {
     outputDir = answer.output;
   }
   // 3. 导出模型精度
-  let precision = 0.1;
+  let precision;
   if (options.precision) {
     // 命令行明确指定了步骤
     if (typeof options.precision == 'string') {

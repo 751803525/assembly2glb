@@ -3,7 +3,7 @@ export interface PipelineConfig {
   outputDir: string;
   simplify: number;
   mode: OutputMode;
-  precision: number;
+  precision?: number;
   dedup: boolean;
   keepTemp: boolean;
   compress: boolean;
