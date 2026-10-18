@@ -1,22 +1,16 @@
 """
 glb-splitter.py — GLB → glTF + BIN 拆分 + 结构树 JSON 导出
-                  保留原始 node 树结构
-                  mesh 内容去重：字节级/浮点量化级相同的 mesh 只导出一份 gltf+bin
-                  顶点合并：位置量化 + 法线角度聚类 + 面积加权平均
-                  材质：PBR 常量 + 贴图
-                        - 保持原始图片格式（PNG/JPG/WebP/... 不转换）
-                        - 支持三种来源：外部文件 / data URI (base64) / bufferView
-                        - 落盘为 meshs/tex_<内容hash>.<ext>，内容哈希去重
-                  IO 走 mmap + array.array，1G+ GLB 不会爆内存
+
+产物结构 100% 对齐 cad-splitter.py：
+  - 根节点 id/name = ASSEMBLY_ROOT_NAME 或首个 node 名
+  - 每个节点: {id, name, type, transform, [material], [asset], [children]}
+  - id 即最终名字（同名自动去重加 _N 后缀）
+  - 匿名节点: "<parent_meaningful>__node_<idx>"
+  - 根节点挂 materials 表
+  - transform.scale 统一为 [s,s,s]
 
 用法:
-    python glb-splitter.py <input.glb> <output.json> [<ignored>]
-
-输出:
-    <output.json>              结构树（材质表引用相对路径的贴图）
-    meshs/xxx__hash.gltf       每个带 mesh 的 node 一份 glTF
-    meshs/xxx__hash.bin        同名外置 buffer
-    meshs/tex_<hash>.<ext>     贴图（内容哈希去重）
+    python glb-splitter.py <input.glb> <output.json>
 """
 
 import os
@@ -29,6 +23,7 @@ import hashlib
 import mmap
 import array
 import base64
+from collections import defaultdict
 from typing import Dict, Any, List, Optional, Tuple
 
 # =====================================================================
@@ -36,8 +31,9 @@ from typing import Dict, Any, List, Optional, Tuple
 # =====================================================================
 
 MESHS_SUBDIR = "meshs"
+ASSEMBLY_ROOT_NAME = "Assembly_Root"
 
-VERTEX_MERGE_MODE = "normalize"
+VERTEX_MERGE_MODE = "normalize"  # "normalize" | "preserve"
 KEEP_UV = False
 
 SMOOTH_ANGLE_DEG = 30.0
@@ -50,23 +46,8 @@ FILENAME_NAME_MAX_LEN = 80
 FILENAME_HASH_LEN = 8
 IMAGE_HASH_LEN = 16
 
-
-COMPONENT_TYPE_SIZE = {
-    5120: 1,
-    5121: 1,
-    5122: 2,
-    5123: 2,
-    5125: 4,
-    5126: 4,
-}
-COMPONENT_TYPE_FMT = {
-    5120: "b",
-    5121: "B",
-    5122: "h",
-    5123: "H",
-    5125: "I",
-    5126: "f",
-}
+COMPONENT_TYPE_SIZE = {5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4}
+COMPONENT_TYPE_FMT = {5120: "b", 5121: "B", 5122: "h", 5123: "H", 5125: "I", 5126: "f"}
 TYPE_DIM = {
     "SCALAR": 1,
     "VEC2": 2,
@@ -103,7 +84,6 @@ def _sniff_image_ext(raw: bytes, mime_hint: str = "") -> str:
         return ".dds"
     if len(raw) >= 4 and raw[:4] == b"\x76\x2f\x31\x01":
         return ".exr"
-
     return {
         "image/png": ".png",
         "image/jpeg": ".jpg",
@@ -122,8 +102,12 @@ def _material_id(mat: dict) -> str:
     return "mat_" + hashlib.md5(key.encode("utf-8")).hexdigest()[:12]
 
 
-class GlbContainer:
+# =====================================================================
+# GLB 容器
+# =====================================================================
 
+
+class GlbContainer:
     def __init__(self, path: str):
         self.path = path
         self.file = None
@@ -162,7 +146,6 @@ class GlbContainer:
 
             if self.gltf is None:
                 raise ValueError(f"GLB 里没有 JSON chunk: {path}")
-
         except Exception:
             self.close()
             raise
@@ -193,13 +176,15 @@ class GlbContainer:
         return memoryview(self.mm)[start:end]
 
 
+# =====================================================================
+# Splitter
+# =====================================================================
+
+
 class GlbSplitter:
 
     def __init__(
-        self,
-        container: GlbContainer,
-        output_meshs_dir: str,
-        grid_meter: float,
+        self, container: GlbContainer, output_meshs_dir: str, grid_meter: float
     ):
         self.container = container
         self.gltf = container.gltf
@@ -217,6 +202,8 @@ class GlbSplitter:
 
         self.keep_uv = True if VERTEX_MERGE_MODE == "preserve" else KEEP_UV
 
+    # ---------------- 名字工具 ----------------
+
     @staticmethod
     def _sanitize_filename(name: str) -> str:
         if not name:
@@ -225,6 +212,8 @@ class GlbSplitter:
         s = "".join(c for c in s if c.isprintable())
         s = re.sub(r"_+", "_", s)
         return s.strip(" ._")
+
+    # ---------------- 贴图 ----------------
 
     def _read_image_raw(self, image_idx: int) -> Optional[Tuple[str, bytes]]:
         images = self.gltf.get("images", [])
@@ -315,6 +304,8 @@ class GlbSplitter:
             return None
         return self._ensure_image_file(int(src))
 
+    # ---------------- 材质表 ----------------
+
     def register_material(self, mat_idx: int) -> Optional[str]:
         materials = self.gltf.get("materials", [])
         if mat_idx < 0 or mat_idx >= len(materials):
@@ -371,6 +362,8 @@ class GlbSplitter:
             self.material_table[mid] = mat
         return mid
 
+    # ---------------- accessor ----------------
+
     def read_accessor_array(self, acc_idx: int) -> array.array:
         acc = self.gltf["accessors"][acc_idx]
         count = int(acc["count"])
@@ -382,8 +375,7 @@ class GlbSplitter:
         bv_idx = acc.get("bufferView")
         if bv_idx is None:
             return array.array(
-                typecode,
-                bytes(COMPONENT_TYPE_SIZE[comp_type] * total_elems),
+                typecode, bytes(COMPONENT_TYPE_SIZE[comp_type] * total_elems)
             )
 
         bv = self.gltf["bufferViews"][bv_idx]
@@ -411,6 +403,8 @@ class GlbSplitter:
             mv = self.container.read_bin_view(off, elem_size)
             arr.frombytes(mv)
         return arr
+
+    # ---------------- mesh 去重签名 ----------------
 
     def _mesh_full_signature(self, mesh_idx: int) -> bytes:
         if mesh_idx in self._mesh_full_sig:
@@ -474,10 +468,10 @@ class GlbSplitter:
         self._canonical_mesh[mesh_idx] = canonical
         return canonical
 
+    # ---------------- 节点变换 ----------------
+
     @staticmethod
-    def _decompose_matrix(
-        m: List[float],
-    ) -> Tuple[List[float], List[float], List[float]]:
+    def _decompose_matrix(m) -> Tuple[List[float], List[float], List[float]]:
         tx, ty, tz = m[12], m[13], m[14]
         c0 = (m[0], m[1], m[2])
         c1 = (m[4], m[5], m[6])
@@ -533,26 +527,15 @@ class GlbSplitter:
             t = node.get("translation", [0.0, 0.0, 0.0])
             r = node.get("rotation", [0.0, 0.0, 0.0, 1.0])
             s = node.get("scale", [1.0, 1.0, 1.0])
-
-        if abs(s[0] - s[1]) < 1e-9 and abs(s[1] - s[2]) < 1e-9:
-            scale_out: Any = float(s[0])
-        else:
-            scale_out = [float(x) for x in s]
-
         return {
             "position": [float(x) for x in t],
             "quaternion": [float(x) for x in r],
-            "scale": scale_out,
+            "scale": [float(x) for x in s],
         }
 
-    def _merge_vertices(
-        self,
-        positions: array.array,
-        normals: Optional[array.array],
-        uvs: Optional[array.array],
-        indices: array.array,
-        vertex_offset: int,
-    ) -> Tuple[array.array, array.array, Optional[array.array], array.array]:
+    # ---------------- 顶点合并 ----------------
+
+    def _merge_vertices(self, positions, normals, uvs, indices, vertex_offset):
         num_verts = len(positions) // 3
         num_tris = len(indices) // 3
 
@@ -763,6 +746,8 @@ class GlbSplitter:
 
         return cluster_positions, out_normals, cluster_uvs, new_indices
 
+    # ---------------- mesh 导出 ----------------
+
     def export_mesh(self, mesh_idx: int, display_name: str) -> Optional[str]:
         canonical = self.resolve_canonical_mesh(mesh_idx)
         if canonical in self.mesh_cache:
@@ -814,12 +799,10 @@ class GlbSplitter:
 
             if VERTEX_MERGE_MODE == "preserve":
                 new_positions = positions
-                new_normals = (
-                    normals
-                    if normals is not None
-                    else array.array("f", bytes(len(positions) * 4))
-                )
-                if normals is None:
+                if normals is not None:
+                    new_normals = normals
+                else:
+                    new_normals = array.array("f", bytes(len(positions) * 4))
                     for vi in range(len(positions) // 3):
                         new_normals[vi * 3 + 2] = 1.0
                 new_uvs = uvs
@@ -840,10 +823,7 @@ class GlbSplitter:
 
             src_mat_idx = prim.get("material")
             out_prims.append(
-                (
-                    new_indices,
-                    int(src_mat_idx) if src_mat_idx is not None else None,
-                )
+                (new_indices, int(src_mat_idx) if src_mat_idx is not None else None)
             )
 
         if not out_prims or len(all_positions) == 0:
@@ -1112,8 +1092,9 @@ class GlbSplitter:
             "asset": {"version": "2.0", "generator": "glb-splitter"},
             "scene": 0,
             "scenes": [{"nodes": [0]}],
-            "nodes": [{"mesh": 0}],
-            "meshes": [{"primitives": out_primitives}],
+            # 给 node / mesh 起名，与 cad-splitter 一致
+            "nodes": [{"mesh": 0, "name": mesh_name}],
+            "meshes": [{"name": mesh_name, "primitives": out_primitives}],
             "buffers": [{"byteLength": len(bin_buffer), "uri": bin_filename}],
             "bufferViews": buffer_views,
             "accessors": accessors,
@@ -1150,13 +1131,26 @@ class GlbSplitter:
                 ids.append(mid)
         return ids
 
-    def build_node(self, node_idx: int) -> Dict[str, Any]:
+    # ---------------- 树构建 ----------------
+
+    def build_node(
+        self, node_idx: int, parent_meaningful: str = ASSEMBLY_ROOT_NAME
+    ) -> Dict[str, Any]:
         node = self.gltf["nodes"][node_idx]
-        name = node.get("name") or f"Node_{node_idx}"
+        raw_name = (node.get("name") or "").strip()
+
+        # 与 cad-splitter 一致的命名：有意义名字优先；否则 父名__node_<idx>
+        if raw_name:
+            name = self._sanitize_filename(raw_name) or raw_name
+            next_meaningful = name
+        else:
+            name = f"{parent_meaningful}__node_{node_idx}"
+            next_meaningful = parent_meaningful
+
         transform = self._get_node_transform(node)
 
         child_indices = node.get("children", []) or []
-        child_nodes = [self.build_node(c) for c in child_indices]
+        child_nodes = [self.build_node(c, next_meaningful) for c in child_indices]
 
         mesh_idx = node.get("mesh")
 
@@ -1165,25 +1159,61 @@ class GlbSplitter:
             mat_ids = self._collect_mesh_mat_ids(mesh_idx)
 
             out: Dict[str, Any] = {
-                "id": str(node_idx),
+                "id": name,
                 "name": name,
                 "type": "mesh",
                 "transform": transform,
-                "children": child_nodes,
             }
-            if asset:
-                out["asset"] = asset
             if mat_ids:
                 out["material"] = mat_ids
+            if asset:
+                out["asset"] = asset
+            if child_nodes:
+                out["children"] = child_nodes
             return out
 
-        return {
-            "id": str(node_idx),
+        out = {
+            "id": name,
             "name": name,
             "type": "node",
             "transform": transform,
-            "children": child_nodes,
         }
+        if child_nodes:
+            out["children"] = child_nodes
+        return out
+
+
+# =====================================================================
+# 名字去重（与 cad-splitter 逻辑一致）
+# =====================================================================
+
+
+def _dedupe_tree_names(tree: Dict[str, Any]) -> None:
+    all_nodes: List[Dict[str, Any]] = []
+
+    def walk(n):
+        all_nodes.append(n)
+        for c in n.get("children", []):
+            walk(c)
+
+    walk(tree)
+
+    grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for n in all_nodes:
+        grouped[n["id"]].append(n)
+
+    for name, nodes in grouped.items():
+        if len(nodes) <= 1:
+            continue
+        for i, n in enumerate(nodes[1:], 1):
+            new_name = f"{name}_{i}"
+            n["id"] = new_name
+            n["name"] = new_name
+
+
+# =====================================================================
+# 入口
+# =====================================================================
 
 
 def split_glb(input_path: str, output_json: str, grid_meter: float) -> None:
@@ -1208,26 +1238,34 @@ def split_glb(input_path: str, output_json: str, grid_meter: float) -> None:
 
         if len(root_indices) == 1:
             tree = exporter.build_node(root_indices[0])
+            # 确保根节点有合理的名字（与 cad-splitter 一致）
+            if not tree.get("name"):
+                tree["name"] = ASSEMBLY_ROOT_NAME
+                tree["id"] = ASSEMBLY_ROOT_NAME
         else:
-            log(f"[tree] 多根（{len(root_indices)} 个），自动包一层 Assembly_Root")
+            log(
+                f"[tree] 多根（{len(root_indices)} 个），自动包一层 {ASSEMBLY_ROOT_NAME}"
+            )
             children = [exporter.build_node(i) for i in root_indices]
             tree = {
-                "id": "Assembly_Root",
-                "name": "Assembly_Root",
+                "id": ASSEMBLY_ROOT_NAME,
+                "name": ASSEMBLY_ROOT_NAME,
                 "type": "node",
                 "transform": {
                     "position": [0.0, 0.0, 0.0],
                     "quaternion": [0.0, 0.0, 0.0, 1.0],
-                    "scale": 1.0,
+                    "scale": [1.0, 1.0, 1.0],
                 },
                 "children": children,
             }
 
+        # 名字去重（保证 id 唯一）
+        _dedupe_tree_names(tree)
+
+        # 根节点挂材质表（与 cad-splitter 一致）
         tree["materials"] = exporter.material_table
 
-        unique_meshes = len(
-            [k for k in exporter.mesh_cache.keys() if isinstance(k, int)]
-        )
+        unique_meshes = len(exporter.mesh_cache)
         log(
             f"[mesh] 唯一 glTF {unique_meshes} 个，"
             f"材质 {len(exporter.material_table)} 个，"
@@ -1242,19 +1280,30 @@ def split_glb(input_path: str, output_json: str, grid_meter: float) -> None:
 
 def main() -> None:
     if len(sys.argv) < 3:
-        print("用法: python glb-splitter.py <input.glb> <output.json>")
+        print("用法: python glb-splitter.py <input.glb> <output.json> [grid_meter]")
+        print("       grid_meter  可选，顶点合并网格精度（米），默认 1e-5")
         sys.exit(1)
 
     input_path = sys.argv[1]
     output_json = sys.argv[2]
 
-    log(
-        f"[unit] 顶点量化网格: {VERTEX_POS_GRID_METER} 米 "
-        f"(模式={VERTEX_MERGE_MODE})"
-    )
+    # 可选第 3 参数覆盖 VERTEX_POS_GRID_METER
+    grid_meter = VERTEX_POS_GRID_METER
+    if len(sys.argv) >= 4:
+        try:
+            grid_meter = float(sys.argv[3])
+            if grid_meter <= 0:
+                raise ValueError
+        except ValueError:
+            log_err(
+                f"[warn] grid_meter '{sys.argv[3]}' 无效，沿用默认 {VERTEX_POS_GRID_METER}"
+            )
+            grid_meter = VERTEX_POS_GRID_METER
+
+    log(f"[unit] 顶点量化网格: {grid_meter} 米 (模式={VERTEX_MERGE_MODE})")
 
     try:
-        split_glb(input_path, output_json, VERTEX_POS_GRID_METER)
+        split_glb(input_path, output_json, grid_meter)
     except SystemExit:
         raise
     except Exception:

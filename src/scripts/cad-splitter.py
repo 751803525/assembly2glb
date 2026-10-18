@@ -879,7 +879,7 @@ class CadToGlbConverter:
         transform_dict = {
             "position": position,
             "quaternion": quaternion,
-            "scale": scale,
+            "scale": [scale, scale, scale],
         }
 
         if is_asm:

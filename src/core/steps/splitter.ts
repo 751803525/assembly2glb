@@ -4,14 +4,12 @@ import { PipelineConfig } from './types.js';
 import { cad_splitter, glb_splitter } from '@/scripts/index.js';
 import { spawn } from '@/utils/child-process-utils.js';
 import { fileUtils } from '@/utils/file-utils.js';
+import { glbUsesDraco, gltfUsesDraco, decompressDracoGlb } from '@/utils/draco-utils.js';
 
 const TAG = 'splitter';
 
-// STEP/IGES 走 cad-splitter；GLB/GLTF 走 glb-splitter
 const STEP_EXT = new Set(['.step', '.stp', '.iges', '.igs']);
 const GLB_EXT = new Set(['.glb', '.gltf']);
-
-// 唯一真正是二进制容器、不能做字符集转码的格式
 const BINARY_CONTAINER_EXT = new Set(['.glb']);
 
 export async function splitter(config: PipelineConfig & { env: string }): Promise<string> {
@@ -31,9 +29,6 @@ export async function splitter(config: PipelineConfig & { env: string }): Promis
   }
 
   // 2. 编码对齐
-  //   - .glb 是二进制容器，不做字符集检测（内部的 JSON chunk 若不合规只能报错）
-  //   - .gltf 是文本 JSON，可能遇到非 UTF-8（不合规但存在），做检测
-  //   - .step/.stp/.iges/.igs 是 ISO-10303 / 文本，做检测
   let encodingPath = inputPath;
   if (!BINARY_CONTAINER_EXT.has(ext)) {
     const encodding = await detectNonAsciiEncoding(inputPath);
@@ -49,16 +44,32 @@ export async function splitter(config: PipelineConfig & { env: string }): Promis
     }
   }
 
-  // 3. 抽取结构树与零件网格
+  // 3. Draco 预处理（仅 .glb / .gltf）
+  let finalInputPath = encodingPath;
+  if (ext === '.glb' || ext === '.gltf') {
+    const usesDraco =
+      ext === '.glb' ? await glbUsesDraco(encodingPath) : await gltfUsesDraco(encodingPath);
+
+    if (usesDraco) {
+      const dracoDir = path.join(outputDir, 'convert-draco');
+      await fileUtils.prepareEmptyDir(dracoDir);
+      const dracoFreePath = path.join(outputDir, 'convert-draco', `draco-free${ext}`);
+      await decompressDracoGlb(encodingPath, dracoFreePath);
+      finalInputPath = dracoFreePath;
+    }
+  }
+
+  // 4. 抽取结构树与零件网格
   console.info(TAG, `抽取结构树（${path.basename(splitter)}）`);
   const splitDir = path.join(outputDir, 'convert-split-part');
   await fileUtils.prepareEmptyDir(splitDir);
 
   await spawn(
     env,
-    [splitter, encodingPath, path.join(splitDir, 'assembly-tree.json'), precision?.toString()],
+    [splitter, finalInputPath, path.join(splitDir, 'assembly-tree.json'), precision?.toString()],
     {},
     TAG
   );
+
   return splitDir;
 }
